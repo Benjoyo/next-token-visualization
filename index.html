@@ -23,6 +23,12 @@
       --accent:#6d5efc;         /* pastel purple */
       --accent2:#2dd4bf;        /* teal */
       --accent3:#fbbf24;        /* amber */
+      --specialBg: rgba(251,191,36,.22);
+      --specialBorder: rgba(251,191,36,.45);
+      --specialText: rgba(120,74,10,1);
+      --token-stack-width: 210px;
+      --llm-width: 280px;
+      --gap-min: 16px;
       --danger:#ef4444;
       --ok:#22c55e;
       --wire: rgba(109,94,252,.30);
@@ -244,11 +250,24 @@
       position:absolute;
       inset:0;
       display:grid;
-      grid-template-columns: 420px 1fr 460px;
-      gap: 14px;
+      grid-template-columns:
+        420px
+        minmax(var(--gap-min), 1fr)
+        var(--token-stack-width)
+        minmax(var(--gap-min), 1fr)
+        var(--llm-width)
+        minmax(var(--gap-min), 1fr)
+        minmax(460px, 2fr);
+      row-gap: 14px;
+      column-gap: 0;
       padding: 16px;
       min-height:0;
     }
+    .leftCol{ grid-column: 1; min-width:0; display:flex; flex-direction:column; }
+    .leftCol .branches{ flex:1; }
+    .tokenStack{ grid-column: 3; }
+    .llm{ grid-column: 5; }
+    .dist{ grid-column: 7; min-width:0; }
 
     /* Branches */
     .branches{
@@ -345,6 +364,11 @@
       border-color: rgba(45,212,191,.25);
       color: rgba(13,81,76,1);
     }
+    .tok.special{
+      background: var(--specialBg);
+      border-color: var(--specialBorder);
+      color: var(--specialText);
+    }
     .tok.newTok{
       animation: popIn .22s ease-out;
     }
@@ -372,27 +396,21 @@
 
     /* Center / tokens + LLM */
     .center{
-      position:relative;
-      display:flex;
-      gap: 14px;
-      align-items:stretch;
-      min-height:0;
+      display: contents;
     }
 
     .tokenStack{
-      width: 210px;
-      background: rgba(255,255,255,.65);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: 0 14px 34px rgba(20,24,39,.08);
-      padding: 12px;
+      width: var(--token-stack-width);
+      flex: 0 0 var(--token-stack-width);
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0;
       overflow:auto;
     }
     .tokenStackTitle{
-      font-size: 12px;
-      font-weight: 800;
-      color: rgba(20,24,39,.58);
-      margin-bottom: 10px;
+      display:none;
     }
     .stackCol{
       display:flex;
@@ -411,14 +429,45 @@
       font-weight: 900;
       color: rgba(20,24,39,.78);
     }
+    .stackTok.toggle{
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .stackTok.toggle:hover{
+      transform: translateY(-1px);
+      box-shadow: 0 14px 30px rgba(20,24,39,.10);
+      border-color: rgba(109,94,252,.25);
+    }
+    .stackTok.delete{
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
+    }
+    .stackTok.delete:hover{
+      background: rgba(239,68,68,.16);
+      border-color: rgba(239,68,68,.32);
+      color: rgba(110,20,20,1);
+      box-shadow: 0 14px 30px rgba(239,68,68,.16);
+    }
+    .stackTok.summary{
+      background: rgba(255,255,255,.85);
+      border-style: dashed;
+      color: rgba(20,24,39,.62);
+      font-weight: 800;
+    }
     .stackTok.gen{
       background: rgba(45,212,191,.14);
       border-color: rgba(45,212,191,.24);
       color: rgba(13,81,76,1);
     }
+    .stackTok.special{
+      background: var(--specialBg);
+      border-color: var(--specialBorder);
+      color: var(--specialText);
+    }
 
     .llm{
-      flex:1;
+      flex: 0 0 var(--llm-width);
+      width: var(--llm-width);
       background: rgba(255,255,255,.68);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -533,6 +582,14 @@
       border-color: rgba(109,94,252,.35);
       box-shadow: 0 18px 44px rgba(109,94,252,.14);
     }
+    .barRow.cut{
+      opacity: .55;
+      filter: grayscale(.2);
+    }
+    .barRow.cut .barFinal{
+      background: rgba(20,24,39,.18);
+      box-shadow: none;
+    }
 
     .barTok{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -542,6 +599,9 @@
       overflow:hidden;
       text-overflow: ellipsis;
       color: rgba(20,24,39,.78);
+    }
+    .barTok.special{
+      color: var(--specialText);
     }
     .barWrap{
       position:relative;
@@ -638,6 +698,110 @@
       position:absolute;
       inset:0;
       pointer-events:none;
+    }
+
+    .tokenOverlay{
+      position:absolute;
+      left:0; top:0;
+      min-width: 260px;
+      max-width: 360px;
+      background: rgba(255,255,255,.96);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 18px 50px rgba(20,24,39,.16);
+      padding: 12px;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity .16s ease, transform .16s ease;
+      pointer-events: auto;
+      z-index: 4;
+    }
+    .tokenOverlay.visible{
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .ovTitle{
+      font-size: 12px;
+      font-weight: 900;
+      color: rgba(20,24,39,.85);
+      margin-bottom: 6px;
+    }
+    .ovMeta{
+      font-size: 11px;
+      font-weight: 800;
+      color: rgba(20,24,39,.6);
+    }
+    .ovParams{
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(20,24,39,.55);
+      line-height: 1.35;
+    }
+    .ovBars{
+      margin-top: 10px;
+      display:flex;
+      flex-direction:column;
+      gap: 6px;
+      max-height: 240px;
+      overflow:auto;
+      padding-right: 2px;
+    }
+    .ovRow{
+      display:grid;
+      grid-template-columns: 1fr 80px 50px;
+      gap: 8px;
+      align-items:center;
+      padding: 6px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(20,24,39,.10);
+      background: rgba(255,255,255,.78);
+    }
+    .ovRow.selected{
+      border-color: rgba(109,94,252,.45);
+      box-shadow: 0 10px 22px rgba(109,94,252,.12);
+    }
+    .ovRow.cut{
+      opacity: .55;
+      filter: grayscale(.2);
+    }
+    .ovTok{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      font-weight: 800;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: rgba(20,24,39,.75);
+    }
+    .ovTok.special{
+      color: var(--specialText);
+    }
+    .ovBarWrap{
+      position:relative;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(20,24,39,.08);
+      overflow:hidden;
+    }
+    .ovBar{
+      position:absolute;
+      inset:0;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(109,94,252,.80), rgba(45,212,191,.55));
+      box-shadow: 0 6px 16px rgba(109,94,252,.16);
+    }
+    .ovRow.cut .ovBar{
+      background: rgba(20,24,39,.18);
+      box-shadow: none;
+    }
+    .ovProb{
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+      font-weight: 900;
+      color: rgba(20,24,39,.6);
     }
 
     .statusLine{
@@ -774,9 +938,10 @@
 
       <div class="viz" id="viz">
         <svg class="wires" id="wires"></svg>
+        <div class="tokenOverlay" id="tokenOverlay"></div>
 
         <div class="vizGrid">
-          <div>
+          <div class="leftCol">
             <div class="branches" id="branches"></div>
             <div class="addBranchRow">
               <button id="newBranchBtn" class="btn ghost" style="flex:1;">＋ New input</button>
@@ -786,7 +951,6 @@
 
           <div class="center">
             <div class="tokenStack" id="tokenStackCard">
-              <div class="tokenStackTitle">Current tokens</div>
               <div class="stackCol" id="tokenStack"></div>
             </div>
             <div class="llm">
@@ -857,6 +1021,7 @@
     activeBranchId: null,
     lastDist: null,
     serverOk: false,
+    collapsePromptStack: false,
   };
 
   const presets = {
@@ -874,6 +1039,20 @@
     if (p === null || p === undefined) return "—";
     const x = Math.max(0, Math.min(1, Number(p)));
     return x.toFixed(3);
+  }
+
+  function snapshotParams(){
+    return {
+      greedy: !!state.params.greedy,
+      temperature: Number(state.params.temperature),
+      top_p: Number(state.params.top_p),
+      repetition_penalty: Number(state.params.repetition_penalty),
+      presence_penalty: Number(state.params.presence_penalty),
+      frequency_penalty: Number(state.params.frequency_penalty),
+      seed: (state.params.seed === null || state.params.seed === undefined) ? null : Number(state.params.seed),
+      stop_sequences: Array.isArray(state.params.stop_sequences) ? [...state.params.stop_sequences] : [],
+      top_k: Number(state.topK),
+    };
   }
 
   async function apiGet(path){
@@ -959,6 +1138,20 @@
     $("playBtn").querySelector("svg").innerHTML = '<path d="M8 5v14l11-7-11-7Z" fill="currentColor"/>';
   }
 
+  function deleteLastCompletionToken(){
+    const b = getActiveBranch();
+    if(!b || !b.completionIds || b.completionIds.length === 0) return;
+    stopPlayback();
+    b.completionIds.pop();
+    b.completionTokens = (b.completionTokens || []).slice(0, b.completionIds.length);
+    b.done = false;
+    b.resetRng = true;
+    $("tokenOverlay").classList.remove("visible");
+    renderBranches();
+    renderTokenStack();
+    updatePreviewDebounced(true);
+  }
+
   function applyPreset(name){
     state.preset = name;
     const btns = $("presetButtons").querySelectorAll(".btn");
@@ -1031,6 +1224,20 @@
 
   function renderBranches(){
     const wrap = $("branches");
+    const prevScrollTop = wrap.scrollTop;
+    let focusInfo = null;
+    const activeEl = document.activeElement;
+    if(activeEl && activeEl.tagName === "TEXTAREA"){
+      const branchEl = activeEl.closest(".branch");
+      if(branchEl && branchEl.dataset.branchId === state.activeBranchId){
+        focusInfo = {
+          branchId: branchEl.dataset.branchId,
+          selectionStart: activeEl.selectionStart,
+          selectionEnd: activeEl.selectionEnd,
+          scrollTop: activeEl.scrollTop
+        };
+      }
+    }
     wrap.innerHTML = "";
 
     state.branches.forEach((b, idx) => {
@@ -1089,7 +1296,7 @@
 
       promptToks.forEach(t => {
         const s = document.createElement("span");
-        s.className = "tok";
+        s.className = "tok" + (t.special ? " special" : "");
         s.textContent = t.display;
         tokWrap.appendChild(s);
       });
@@ -1103,8 +1310,9 @@
 
       genToks.forEach(t => {
         const s = document.createElement("span");
-        s.className = "tok gen";
+        s.className = "tok gen" + (t.special ? " special" : "");
         s.textContent = t.display;
+        attachTokenOverlay(s, t);
         tokWrap.appendChild(s);
       });
 
@@ -1113,6 +1321,18 @@
       div.addEventListener("click", () => selectBranch(b.id));
       wrap.appendChild(div);
     });
+
+    wrap.scrollTop = prevScrollTop;
+    if(focusInfo){
+      const ta = wrap.querySelector(`.branch[data-branch-id="${focusInfo.branchId}"] textarea`);
+      if(ta){
+        ta.focus({ preventScroll: true });
+        try{
+          ta.setSelectionRange(focusInfo.selectionStart, focusInfo.selectionEnd);
+        }catch(e){}
+        ta.scrollTop = focusInfo.scrollTop;
+      }
+    }
 
     // After rendering, wires need update
     requestAnimationFrame(drawWires);
@@ -1126,13 +1346,80 @@
       requestAnimationFrame(drawWires);
       return;
     }
-    const tokens = [...(b.promptTokens || []), ...(b.completionTokens || [])];
-    tokens.forEach((t, i) => {
+    const promptTokens = b.promptTokens || [];
+    const completionTokens = b.completionTokens || [];
+    const hasPrompt = promptTokens.length > 0;
+    const lastCompletionIndex = completionTokens.length - 1;
+    const makeTokenEl = (token, { gen=false, deletable=false, toggle=false, onToggle=null } = {}) => {
+      const t = (token && token.display !== undefined) ? token : { display: String(token) };
+      const special = !!t.special;
       const div = document.createElement("div");
-      div.className = "stackTok " + (i >= (b.promptTokens||[]).length ? "gen" : "");
+      div.className = "stackTok" + (gen ? " gen" : "") + (special ? " special" : "") + (deletable ? " delete" : "") + (toggle ? " toggle" : "");
       div.textContent = t.display;
-      stack.appendChild(div);
-    });
+      if(deletable){
+        div.title = "Click to remove last completion token";
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteLastCompletionToken();
+        });
+      }
+      if(toggle && onToggle){
+        div.title = "Click to collapse prompt tokens";
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          onToggle();
+        });
+      }
+      if(gen && token && token.meta){
+        attachTokenOverlay(div, token);
+      }
+      return div;
+    };
+
+    if(state.collapsePromptStack && hasPrompt){
+      const summary = document.createElement("div");
+      summary.className = "stackTok summary toggle";
+      summary.textContent = `Prompt ×${promptTokens.length}`;
+      summary.title = "Click to expand prompt tokens";
+      summary.addEventListener("click", (e) => {
+        e.stopPropagation();
+        state.collapsePromptStack = false;
+        renderTokenStack();
+      });
+      stack.appendChild(summary);
+    }else{
+      const tokens = [...promptTokens, ...completionTokens];
+      tokens.forEach((t, i) => {
+        const isGen = i >= promptTokens.length;
+        const canToggle = hasPrompt && i === 0;
+        const isLastCompletion = isGen && (i - promptTokens.length === lastCompletionIndex);
+        const div = makeTokenEl(t, {
+          gen: isGen,
+          deletable: isLastCompletion,
+          toggle: canToggle,
+          onToggle: () => {
+            state.collapsePromptStack = true;
+            renderTokenStack();
+          }
+        });
+        if(isLastCompletion){
+          div.title = "Click to remove last completion token";
+        }
+        stack.appendChild(div);
+      });
+    }
+
+    // Always render completion tokens (green) beneath the summary when collapsed.
+    if(state.collapsePromptStack && completionTokens.length){
+      completionTokens.forEach((t, i) => {
+        const isLastCompletion = i === lastCompletionIndex;
+        const div = makeTokenEl(t, {
+          gen: true,
+          deletable: isLastCompletion
+        });
+        stack.appendChild(div);
+      });
+    }
     requestAnimationFrame(drawWires);
   }
 
@@ -1144,6 +1431,7 @@
     if(!dist){
       bars.innerHTML = '<div class="muted" style="padding:10px 4px;">No distribution yet.</div>';
       $("keptInfo").textContent = "";
+      requestAnimationFrame(drawWires);
       return;
     }
 
@@ -1155,10 +1443,12 @@
       const row = document.createElement("div");
       row.className = "barRow" + (highlightTokenId === t.id ? " selected" : "");
       row.dataset.tokenId = t.id;
+      if(t.kept === false) row.classList.add("cut");
 
       const tok = document.createElement("div");
       tok.className = "barTok";
       tok.textContent = t.display;
+      if(t.special) tok.classList.add("special");
 
       const wrap = document.createElement("div");
       wrap.className = "barWrap";
@@ -1206,6 +1496,143 @@
     otherBase.style.width = (Math.max(0, Math.min(1, dist.other_p_base)) * 100).toFixed(2) + "%";
     otherFinal.style.width = (Math.max(0, Math.min(1, dist.other_p_final)) * 100).toFixed(2) + "%";
     bars.appendChild(other);
+    requestAnimationFrame(drawWires);
+  }
+
+  let overlayHideTimer = null;
+
+  function scheduleHideOverlay(){
+    if(overlayHideTimer) clearTimeout(overlayHideTimer);
+    overlayHideTimer = setTimeout(() => {
+      $("tokenOverlay").classList.remove("visible");
+    }, 120);
+  }
+
+  function attachTokenOverlay(el, tokenObj){
+    if(!tokenObj || !tokenObj.meta || !tokenObj.meta.dist) return;
+    el.addEventListener("mouseenter", () => showTokenOverlay(el, tokenObj));
+    el.addEventListener("mouseleave", scheduleHideOverlay);
+  }
+
+  function showTokenOverlay(el, tokenObj){
+    const meta = tokenObj.meta;
+    if(!meta || !meta.dist) return;
+    if(overlayHideTimer) clearTimeout(overlayHideTimer);
+
+    const overlay = $("tokenOverlay");
+    overlay.innerHTML = "";
+
+    const title = document.createElement("div");
+    title.className = "ovTitle";
+    title.textContent = `Token: ${tokenObj.display}`;
+    overlay.appendChild(title);
+
+    const method = document.createElement("div");
+    method.className = "ovMeta";
+    const forcedBy = meta.forced_by ? `Forced (${meta.forced_by})` : null;
+    const methodLabel = forcedBy || (meta.greedy ? "Greedy" : "Sampled");
+    method.textContent = `Method: ${methodLabel}`;
+    overlay.appendChild(method);
+
+    const p = meta.params || {};
+    const parts = [
+      `top_k ${meta.top_k ?? p.top_k ?? state.topK}`,
+      `top_p ${Number(p.top_p ?? 0).toFixed(2)}`,
+      `temp ${Number(p.temperature ?? 0).toFixed(2)}`,
+      `rep ${Number(p.repetition_penalty ?? 1).toFixed(2)}`,
+      `pres ${Number(p.presence_penalty ?? 0).toFixed(2)}`,
+      `freq ${Number(p.frequency_penalty ?? 0).toFixed(2)}`
+    ];
+    if(p.seed !== null && p.seed !== undefined) parts.push(`seed ${p.seed}`);
+    if(Array.isArray(p.stop_sequences) && p.stop_sequences.length){
+      parts.push(`stop ${p.stop_sequences.join(" | ")}`);
+    }
+    const paramsLine = document.createElement("div");
+    paramsLine.className = "ovParams";
+    paramsLine.textContent = parts.join(" · ");
+    overlay.appendChild(paramsLine);
+
+    const bars = document.createElement("div");
+    bars.className = "ovBars";
+    const dist = meta.dist;
+    (dist.tokens || []).forEach(t => {
+      const row = document.createElement("div");
+      row.className = "ovRow";
+      if(t.kept === false) row.classList.add("cut");
+      if(meta.selected_id !== null && meta.selected_id !== undefined && t.id === meta.selected_id){
+        row.classList.add("selected");
+      }
+
+      const tok = document.createElement("div");
+      tok.className = "ovTok";
+      if(t.special) tok.classList.add("special");
+      tok.textContent = t.display;
+
+      const wrap = document.createElement("div");
+      wrap.className = "ovBarWrap";
+      const bar = document.createElement("div");
+      bar.className = "ovBar";
+      bar.style.width = (Math.max(0, Math.min(1, t.p_final || 0)) * 100).toFixed(2) + "%";
+      wrap.appendChild(bar);
+
+      const prob = document.createElement("div");
+      prob.className = "ovProb";
+      prob.textContent = fmtProb(t.p_final);
+
+      row.appendChild(tok);
+      row.appendChild(wrap);
+      row.appendChild(prob);
+      bars.appendChild(row);
+    });
+
+    if(dist.other_p_final !== null && dist.other_p_final !== undefined){
+      const row = document.createElement("div");
+      row.className = "ovRow cut";
+      const tok = document.createElement("div");
+      tok.className = "ovTok";
+      tok.textContent = "Other";
+      const wrap = document.createElement("div");
+      wrap.className = "ovBarWrap";
+      const bar = document.createElement("div");
+      bar.className = "ovBar";
+      bar.style.width = (Math.max(0, Math.min(1, dist.other_p_final || 0)) * 100).toFixed(2) + "%";
+      wrap.appendChild(bar);
+      const prob = document.createElement("div");
+      prob.className = "ovProb";
+      prob.textContent = fmtProb(dist.other_p_final);
+      row.appendChild(tok);
+      row.appendChild(wrap);
+      row.appendChild(prob);
+      bars.appendChild(row);
+    }
+
+    overlay.appendChild(bars);
+
+    overlay.classList.add("visible");
+    positionOverlay(el, overlay);
+  }
+
+  function positionOverlay(el, overlay){
+    const viz = $("viz");
+    const vizRect = viz.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    const pad = 12;
+
+    let left = r.right - vizRect.left + pad;
+    let top = r.top - vizRect.top - 6;
+
+    if(left + overlayRect.width > vizRect.width - pad){
+      left = r.left - vizRect.left - overlayRect.width - pad;
+    }
+    if(left < pad) left = pad;
+    if(top + overlayRect.height > vizRect.height - pad){
+      top = vizRect.height - overlayRect.height - pad;
+    }
+    if(top < pad) top = pad;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
   }
 
   function drawWires(){
@@ -1213,15 +1640,16 @@
     const viz = $("viz");
     const activeBranchEl = document.querySelector('.branch.active');
     const stackCard = $("tokenStackCard");
+    const llmEl = document.querySelector(".llm");
 
-    if(!activeBranchEl || !stackCard){
+    if(!activeBranchEl || !stackCard || !llmEl){
       svg.innerHTML = "";
       return;
     }
 
     const vizRect = viz.getBoundingClientRect();
     const aRect = activeBranchEl.getBoundingClientRect();
-    const stackRect = stackCard.getBoundingClientRect();
+    const llmRect = llmEl.getBoundingClientRect();
 
     // Starting point: right-middle of active branch card.
     const x1 = aRect.right - vizRect.left;
@@ -1230,11 +1658,14 @@
     // Endpoints: left side of each token in stack
     const tokenEls = $("tokenStack").querySelectorAll(".stackTok");
     const paths = [];
+    const tokenPoints = [];
 
     tokenEls.forEach((el, i) => {
       const r = el.getBoundingClientRect();
       const x2 = r.left - vizRect.left;
       const y2 = r.top - vizRect.top + r.height * 0.5;
+      const xRight = r.right - vizRect.left;
+      tokenPoints.push({ xLeft: x2, xRight, y: y2, i });
 
       const dx = Math.max(80, (x2 - x1) * 0.55);
       const c1x = x1 + dx;
@@ -1247,18 +1678,42 @@
       paths.push(`<path d="${d}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2.2" stroke-linecap="round"/>`);
     });
 
-    // Also draw a subtle connector into the LLM box
-    const llmEl = document.querySelector(".llm");
-    if(llmEl){
-      const r = llmEl.getBoundingClientRect();
-      const x2 = r.left - vizRect.left;
-      const y2 = r.top - vizRect.top + r.height * 0.5;
-      const xMid = stackRect.right - vizRect.left;
-      const yMid = y2;
+    const llmLeft = llmRect.left - vizRect.left;
+    const llmRight = llmRect.right - vizRect.left;
+    const pad = 4;
+    const stubLen = 18;
+    const llmLeftStubEnd = llmLeft - pad;
+    const llmRightStubStart = llmRight + pad;
 
-      const d2 = `M ${xMid} ${yMid} C ${xMid+60} ${yMid}, ${x2-60} ${y2}, ${x2} ${y2}`;
-      paths.push(`<path d="${d2}" fill="none" stroke="rgba(45,212,191,0.22)" stroke-width="3.2" stroke-linecap="round"/>`);
-    }
+    // Horizontal lines from each token into the LLM box
+    tokenPoints.forEach((p, i) => {
+      const xStart = p.xRight + pad;
+      const maxStub = Math.max(6, Math.min(stubLen, llmLeftStubEnd - xStart));
+      const stubStart = llmLeftStubEnd - maxStub;
+      if(stubStart <= xStart) return;
+      const opacity = 0.16 + Math.min(0.18, i * 0.01);
+      const d = `M ${xStart} ${p.y} L ${stubStart} ${p.y}`;
+      const dStub = `M ${stubStart} ${p.y} L ${llmLeftStubEnd} ${p.y}`;
+      paths.push(`<path d="${d}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${dStub}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+    });
+
+    // Horizontal lines from the LLM box to each distribution row
+    const barsEl = $("bars");
+    const barRows = barsEl ? barsEl.querySelectorAll(".barRow") : [];
+    barRows.forEach((row, i) => {
+      const r = row.getBoundingClientRect();
+      const y = r.top - vizRect.top + r.height * 0.5;
+      const xEnd = r.left - vizRect.left - pad;
+      const maxStub = Math.max(6, Math.min(stubLen, xEnd - llmRightStubStart));
+      const stubEnd = llmRightStubStart + maxStub;
+      if(xEnd <= llmRightStubStart) return;
+      const opacity = 0.14 + Math.min(0.16, i * 0.008);
+      const dStub = `M ${llmRightStubStart} ${y} L ${stubEnd} ${y}`;
+      const d = `M ${stubEnd} ${y} L ${xEnd} ${y}`;
+      paths.push(`<path d="${dStub}" fill="none" stroke="rgba(45,212,191,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${d}" fill="none" stroke="rgba(45,212,191,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+    });
 
     svg.setAttribute("viewBox", `0 0 ${vizRect.width} ${vizRect.height}`);
     svg.innerHTML = paths.join("");
@@ -1323,7 +1778,7 @@
   let previewTimer = null;
   function updatePreviewDebounced(immediate=false){
     if(previewTimer) clearTimeout(previewTimer);
-    const delay = immediate ? 0 : 350;
+    const delay = immediate ? 0 : 220;
     previewTimer = setTimeout(() => updatePreview(), delay);
   }
 
@@ -1357,7 +1812,11 @@
 
       // Update tokens for active branch
       b.promptTokens = res.prompt_tokens || [];
-      b.completionTokens = res.completion_tokens || [];
+      const prevCompletion = b.completionTokens || [];
+      b.completionTokens = (res.completion_tokens || []).map((t, i) => {
+        const prev = prevCompletion[i] || {};
+        return prev.meta ? { ...t, meta: prev.meta } : t;
+      });
 
       renderBranches();
       renderTokenStack();
@@ -1391,6 +1850,9 @@
     try{
       readParamsFromControls();
       if(state.preset === "greedy") state.params.greedy = true;
+      const paramsSnapshot = snapshotParams();
+      const forcedBy = extra.force_text ? "text" : (extra.force_token_id !== undefined && extra.force_token_id !== null ? "token" : null);
+      const forced = !!forcedBy;
 
       const res = await apiPost("/api/step", {
         branch_id: b.id,
@@ -1412,8 +1874,19 @@
         // Update token ids: server returns only new_completion_ids
         b.completionIds = res.new_completion_ids || b.completionIds;
         // Also update token pills incrementally for smooth animation
-        appended.forEach(t => {
-          b.completionTokens.push({ ...t, _new:true });
+        const appendedMeta = res.appended_meta || [];
+        appended.forEach((t, idx) => {
+          const metaFromServer = appendedMeta[idx] || null;
+          const meta = {
+            dist: metaFromServer?.dist || res.dist || null,
+            selected_id: metaFromServer?.selected_id ?? (res.selected ? res.selected.id : (forced ? t.id : null)),
+            forced: metaFromServer?.forced ?? forced,
+            forced_by: metaFromServer?.forced_by ?? forcedBy,
+            greedy: paramsSnapshot.greedy,
+            params: paramsSnapshot,
+            top_k: paramsSnapshot.top_k,
+          };
+          b.completionTokens.push({ ...t, _new:true, meta });
         });
       }
 
@@ -1558,6 +2031,15 @@
     $("stepBtn").addEventListener("click", () => doStep());
 
     window.addEventListener("resize", () => requestAnimationFrame(drawWires));
+    $("tokenStack").addEventListener("scroll", () => requestAnimationFrame(drawWires));
+    $("bars").addEventListener("scroll", () => requestAnimationFrame(drawWires));
+    $("branches").addEventListener("scroll", () => requestAnimationFrame(drawWires));
+
+    const overlay = $("tokenOverlay");
+    overlay.addEventListener("mouseenter", () => {
+      if(overlayHideTimer) clearTimeout(overlayHideTimer);
+    });
+    overlay.addEventListener("mouseleave", scheduleHideOverlay);
   }
 
   async function init(){

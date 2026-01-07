@@ -99,6 +99,7 @@ def _visualize_token_piece(s: str) -> str:
 def _token_pills_from_ids(tokenizer, ids: List[int]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_texts = set(getattr(tokenizer, "all_special_tokens", []) or [])
     for tid in ids:
         try:
             if tid in special_ids:
@@ -107,11 +108,13 @@ def _token_pills_from_ids(tokenizer, ids: List[int]) -> List[Dict[str, Any]]:
                 raw = tokenizer.decode([int(tid)], clean_up_tokenization_spaces=False)
         except Exception:
             raw = f"<id:{tid}>"
+        is_special = (tid in special_ids) or (raw in special_texts)
         out.append(
             {
                 "id": int(tid),
                 "text": raw,
                 "display": _visualize_token_piece(raw),
+                "special": bool(is_special),
             }
         )
     return out
@@ -432,18 +435,39 @@ def _compute_next_token_distribution(
     logits_temp = logits_mod / temp
     probs_temp = torch.softmax(logits_temp, dim=-1)
 
-    # Nucleus filtering (top-p)
+    # Sort by temp-scaled probs for display and nucleus filtering
     sorted_probs, sorted_ids = torch.sort(probs_temp, descending=True)
-    kept_ids, kept_probs = _nucleus_filter_sorted(sorted_probs, sorted_ids, top_p)
 
-    # Take the first K for display (these are the highest-prob tokens in the final distribution)
-    k = min(top_k, int(kept_ids.numel()))
-    top_ids = kept_ids[:k]
-    top_final_probs = kept_probs[:k]
+    # Determine nucleus cutoff count (keep at least 1)
+    if float(top_p) >= 1.0:
+        kept_count = int(sorted_probs.numel())
+    else:
+        cum = torch.cumsum(sorted_probs, dim=-1)
+        mask = cum <= float(top_p)
+        if mask.numel() > 0:
+            mask[0] = True
+        kept_count = int(mask.sum().item())
+
+    # Take top-k from the full (pre-nucleus) distribution for display
+    k = min(int(top_k), int(sorted_ids.numel()))
+    top_ids = sorted_ids[:k]
     top_base_probs = probs_base[top_ids]
 
-    # "Other mass" = everything beyond top-k in the *final* distribution.
-    other_final = float(max(0.0, 1.0 - float(top_final_probs.sum().item())))
+    # Renormalize kept probs for final distribution
+    kept_probs = sorted_probs[:kept_count]
+    denom = kept_probs.sum()
+    top_final_probs = []
+    top_kept_flags = []
+    for i in range(k):
+        if i < kept_count and denom > 0:
+            top_final_probs.append(float((kept_probs[i] / denom).item()))
+            top_kept_flags.append(True)
+        else:
+            top_final_probs.append(0.0)
+            top_kept_flags.append(False)
+
+    # "Other mass" = everything beyond top-k in the final distribution.
+    other_final = float(max(0.0, 1.0 - float(sum(top_final_probs))))
     other_base = float(max(0.0, 1.0 - float(top_base_probs.sum().item())))
 
     # Decode tokens for display
@@ -453,14 +477,15 @@ def _compute_next_token_distribution(
     # Attach probabilities
     for i, tok in enumerate(top_tokens):
         tok["p_base"] = float(top_base_probs[i].detach().cpu().item())
-        tok["p_final"] = float(top_final_probs[i].detach().cpu().item())
+        tok["p_final"] = float(top_final_probs[i])
+        tok["kept"] = bool(top_kept_flags[i])
 
     return {
         "top_k": top_k,
         "tokens": top_tokens,
         "other_p_base": other_base,
         "other_p_final": other_final,
-        "kept_token_count": int(kept_ids.numel()),
+        "kept_token_count": int(kept_count),
     }
 
 
@@ -603,16 +628,8 @@ def preview(req: PreviewRequest):
         frequency_penalty=req.params.frequency_penalty,
     )
 
-    # Display tokens (prompt and completion separately, without chat framing)
-    prompt_display_ids = tok(req.prompt, add_special_tokens=False, return_tensors=None)["input_ids"]
-    if isinstance(prompt_display_ids, (list, tuple)) and len(prompt_display_ids) > 0 and isinstance(prompt_display_ids[0], (list, tuple)):
-        prompt_display_ids = prompt_display_ids[0]
-    if isinstance(prompt_display_ids, torch.Tensor):
-        prompt_display_ids = prompt_display_ids.detach().cpu().tolist()
-    if isinstance(prompt_display_ids, np.ndarray):
-        prompt_display_ids = prompt_display_ids.tolist()
-    prompt_display_ids = [int(x) for x in list(prompt_display_ids)]
-    prompt_tokens = _token_pills_from_ids(tok, prompt_display_ids)
+    # Display tokens exactly as the model sees them (including chat template tokens).
+    prompt_tokens = _token_pills_from_ids(tok, prompt_ids)
     completion_tokens = _token_pills_from_ids(tok, [int(x) for x in (req.completion_ids or [])])
 
     return {
@@ -647,21 +664,34 @@ def step(req: StepRequest):
         forced_ids = [int(x) for x in list(forced_ids)]
         new_completion = [int(x) for x in (req.completion_ids or [])] + forced_ids
 
-        # Still return the distribution at the point of forcing (current state)
-        prompt_ids, full_ids = _build_input_ids(tok, req.prompt, req.completion_ids)
-        dist = _compute_next_token_distribution(
-            model=model,
-            tokenizer=tok,
-            full_input_ids=full_ids,
-            top_k=req.top_k,
-            temperature=req.params.temperature,
-            top_p=req.params.top_p,
-            repetition_penalty=req.params.repetition_penalty,
-            presence_penalty=req.params.presence_penalty,
-            frequency_penalty=req.params.frequency_penalty,
-        )
+        # Compute distribution for each forced token at the time it was appended.
+        appended_meta: List[Dict[str, Any]] = []
+        current_completion = [int(x) for x in (req.completion_ids or [])]
+        for fid in forced_ids:
+            _prompt_ids, full_ids = _build_input_ids(tok, req.prompt, current_completion)
+            dist = _compute_next_token_distribution(
+                model=model,
+                tokenizer=tok,
+                full_input_ids=full_ids,
+                top_k=req.top_k,
+                temperature=req.params.temperature,
+                top_p=req.params.top_p,
+                repetition_penalty=req.params.repetition_penalty,
+                presence_penalty=req.params.presence_penalty,
+                frequency_penalty=req.params.frequency_penalty,
+            )
+            appended_meta.append(
+                {
+                    "dist": dist,
+                    "selected_id": int(fid),
+                    "forced": True,
+                    "forced_by": "text",
+                }
+            )
+            current_completion.append(int(fid))
 
         appended_tokens = _token_pills_from_ids(tok, forced_ids)
+        dist = appended_meta[0]["dist"] if appended_meta else None
 
         # Stop detection
         eos = public.eos_token_id
@@ -690,6 +720,7 @@ def step(req: StepRequest):
             "dist": dist,
             "selected": None,
             "appended": appended_tokens,
+            "appended_meta": appended_meta,
             "new_completion_ids": new_completion,
             "done": done,
             "stop_reason": stop_reason,
@@ -725,29 +756,54 @@ def step(req: StepRequest):
     probs_temp = torch.softmax(logits_mod / temp, dim=-1)
 
     sorted_probs, sorted_ids = torch.sort(probs_temp, descending=True)
-    kept_ids, kept_probs = _nucleus_filter_sorted(sorted_probs, sorted_ids, float(req.params.top_p))
 
-    # Distribution for display (top-k of final distribution)
+    # Determine nucleus cutoff count (keep at least 1)
+    if float(req.params.top_p) >= 1.0:
+        kept_count = int(sorted_probs.numel())
+    else:
+        cum = torch.cumsum(sorted_probs, dim=-1)
+        mask = cum <= float(req.params.top_p)
+        if mask.numel() > 0:
+            mask[0] = True
+        kept_count = int(mask.sum().item())
+
+    kept_ids = sorted_ids[:kept_count]
+    kept_probs = sorted_probs[:kept_count]
+    denom = kept_probs.sum()
+    kept_probs_norm = kept_probs / denom if denom > 0 else kept_probs
+
+    # Distribution for display (top-k from full distribution)
     top_k = int(max(1, min(int(req.top_k), 50)))
-    k = min(top_k, int(kept_ids.numel()))
-    top_ids = kept_ids[:k]
-    top_final_probs = kept_probs[:k]
+    k = min(top_k, int(sorted_ids.numel()))
+    top_ids = sorted_ids[:k]
     top_base_probs = probs_base[top_ids]
-    other_final = float(max(0.0, 1.0 - float(top_final_probs.sum().item())))
+
+    top_final_probs: List[float] = []
+    top_kept_flags: List[bool] = []
+    for i in range(k):
+        if i < kept_count and denom > 0:
+            top_final_probs.append(float(kept_probs_norm[i].detach().cpu().item()))
+            top_kept_flags.append(True)
+        else:
+            top_final_probs.append(0.0)
+            top_kept_flags.append(False)
+
+    other_final = float(max(0.0, 1.0 - float(sum(top_final_probs))))
     other_base = float(max(0.0, 1.0 - float(top_base_probs.sum().item())))
 
     top_ids_list = [int(x) for x in top_ids.detach().cpu().tolist()]
     top_tokens = _token_pills_from_ids(tok, top_ids_list)
     for i, t in enumerate(top_tokens):
         t["p_base"] = float(top_base_probs[i].detach().cpu().item())
-        t["p_final"] = float(top_final_probs[i].detach().cpu().item())
+        t["p_final"] = float(top_final_probs[i])
+        t["kept"] = bool(top_kept_flags[i])
 
     dist = {
         "top_k": top_k,
         "tokens": top_tokens,
         "other_p_base": other_base,
         "other_p_final": other_final,
-        "kept_token_count": int(kept_ids.numel()),
+        "kept_token_count": int(kept_count),
     }
 
     # Choose token
@@ -760,11 +816,11 @@ def step(req: StepRequest):
     else:
         if bool(req.params.greedy):
             selected_id = int(kept_ids[0].detach().cpu().item())
-            selected_prob_final = float(kept_probs[0].detach().cpu().item())
+            selected_prob_final = float(kept_probs_norm[0].detach().cpu().item()) if denom > 0 else None
         else:
             gen = _get_rng(req.branch_id, req.params.seed, reset=bool(req.reset_rng))
             # Sample from nucleus set
-            kept_probs_cpu = kept_probs.detach().cpu()
+            kept_probs_cpu = kept_probs_norm.detach().cpu()
             kept_ids_cpu = kept_ids.detach().cpu()
             # torch.multinomial expects 1D probs
             idx = int(torch.multinomial(kept_probs_cpu, num_samples=1, replacement=False, generator=gen).item())
@@ -809,6 +865,14 @@ def step(req: StepRequest):
         "dist": dist,
         "selected": selected_info,
         "appended": appended_tokens,
+        "appended_meta": [
+            {
+                "dist": dist,
+                "selected_id": int(selected_id),
+                "forced": bool(req.force_token_id is not None),
+                "forced_by": "token" if req.force_token_id is not None else None,
+            }
+        ],
         "new_completion_ids": new_completion,
         "done": done,
         "stop_reason": stop_reason,
