@@ -1,0 +1,1591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Next Token Visualization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg0:#f6f7ff;
+      --bg1:#f3fbff;
+      --panel: rgba(255,255,255,.78);
+      --panelSolid:#ffffff;
+      --text:#141827;
+      --muted:#6b7280;
+      --border: rgba(20,24,39,.12);
+      --shadow: 0 18px 60px rgba(20,24,39,.10);
+      --shadow2: 0 10px 30px rgba(20,24,39,.08);
+      --radius: 18px;
+      --radius2: 14px;
+      --accent:#6d5efc;         /* pastel purple */
+      --accent2:#2dd4bf;        /* teal */
+      --accent3:#fbbf24;        /* amber */
+      --danger:#ef4444;
+      --ok:#22c55e;
+      --wire: rgba(109,94,252,.30);
+      --wire2: rgba(45,212,191,.26);
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 10%, var(--bg1), transparent 60%),
+        radial-gradient(1000px 500px at 90% 20%, #fff3fb, transparent 55%),
+        linear-gradient(180deg, var(--bg0), #ffffff);
+      overflow:hidden;
+    }
+
+    .app{
+      height:100%;
+      display:flex;
+      gap:16px;
+      padding:16px;
+    }
+
+    /* Sidebar */
+    .sidebar{
+      width: 340px;
+      min-width: 340px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .card{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow2);
+      padding: 14px 14px;
+      backdrop-filter: blur(10px);
+    }
+
+    .card h3{
+      margin:0 0 10px 0;
+      font-size: 14px;
+      letter-spacing:.2px;
+      color: rgba(20,24,39,.85);
+      font-weight: 700;
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .col{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .spacer{ flex:1; }
+
+    label{
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(20,24,39,.75);
+    }
+
+    input[type="text"], input[type="number"], textarea, select{
+      width:100%;
+      background: rgba(255,255,255,.92);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+      box-shadow: 0 4px 14px rgba(20,24,39,.06);
+      transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, textarea:focus{
+      border-color: rgba(109,94,252,.55);
+      box-shadow: 0 10px 22px rgba(109,94,252,.14);
+    }
+    textarea{ resize: vertical; min-height: 64px; }
+
+    .btn{
+      border: 0;
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor:pointer;
+      background: rgba(109,94,252,.12);
+      color: rgba(40,36,90,1);
+      transition: transform .12s ease, box-shadow .18s ease, background .18s ease;
+      box-shadow: 0 10px 22px rgba(20,24,39,.08);
+      user-select:none;
+    }
+    .btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 30px rgba(20,24,39,.10); }
+    .btn:active{ transform: translateY(0px) scale(.99); }
+
+    .btn.primary{
+      background: linear-gradient(135deg, rgba(109,94,252,.90), rgba(45,212,191,.60));
+      color: white;
+    }
+    .btn.ghost{
+      background: rgba(255,255,255,.65);
+      color: rgba(20,24,39,.82);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+    .btn.danger{
+      background: rgba(239,68,68,.12);
+      color: rgba(120,25,25,1);
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.80);
+      box-shadow: 0 6px 18px rgba(20,24,39,.06);
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(20,24,39,.75);
+      user-select:none;
+    }
+    .pill.ok{ background: rgba(34,197,94,.12); color: rgba(17,88,49,1); border-color: rgba(34,197,94,.18); }
+    .pill.warn{ background: rgba(251,191,36,.18); color: rgba(120,74,10,1); border-color: rgba(251,191,36,.25); }
+    .pill.bad{ background: rgba(239,68,68,.14); color: rgba(110,20,20,1); border-color: rgba(239,68,68,.22); }
+
+    .segmented{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .segmented .btn{
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: none;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.65);
+    }
+    .segmented .btn.active{
+      background: rgba(109,94,252,.14);
+      border-color: rgba(109,94,252,.35);
+    }
+
+    .sliderRow{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    input[type="range"]{
+      width:100%;
+      accent-color: var(--accent);
+    }
+    .smallVal{
+      width: 74px;
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+      color: rgba(20,24,39,.68);
+      font-weight: 700;
+    }
+
+    /* Main */
+    .main{
+      flex:1;
+      min-width: 900px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .titleBar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 14px 18px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(10px);
+    }
+    .titleBar h1{
+      margin:0;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .2px;
+    }
+    .titleBar .sub{
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .viz{
+      flex:1;
+      min-height: 0;
+      background: rgba(255,255,255,.55);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      position:relative;
+      overflow:hidden;
+    }
+
+    .vizGrid{
+      position:absolute;
+      inset:0;
+      display:grid;
+      grid-template-columns: 420px 1fr 460px;
+      gap: 14px;
+      padding: 16px;
+      min-height:0;
+    }
+
+    /* Branches */
+    .branches{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+      min-height:0;
+      overflow:auto;
+      padding-right: 6px;
+    }
+
+    .branch{
+      background: rgba(255,255,255,.80);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 12px 30px rgba(20,24,39,.07);
+      padding: 12px 12px;
+      transition: transform .18s ease, opacity .18s ease, filter .18s ease, box-shadow .18s ease, border-color .18s ease;
+      position:relative;
+    }
+    .branch.inactive{
+      opacity:.55;
+      filter: grayscale(.15);
+    }
+    .branch.active{
+      border-color: rgba(109,94,252,.35);
+      box-shadow: 0 18px 44px rgba(109,94,252,.12);
+    }
+    .branchHeader{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-bottom: 10px;
+    }
+    .branchTitle{
+      font-weight: 800;
+      font-size: 13px;
+      color: rgba(20,24,39,.85);
+    }
+    .branchMeta{
+      font-size: 12px;
+      color: rgba(20,24,39,.55);
+      font-weight: 700;
+    }
+
+    .forkBtn{
+      margin-left:auto;
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 13px;
+      background: rgba(45,212,191,.14);
+      color: rgba(15,75,70,1);
+      border: 1px solid rgba(45,212,191,.22);
+      box-shadow: none;
+    }
+    .forkBtn:hover{
+      box-shadow: 0 10px 22px rgba(45,212,191,.14);
+    }
+
+    .branch textarea{
+      min-height: 76px;
+      max-height: 240px;
+      line-height: 1.4;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 14px;
+      background: rgba(255,255,255,.92);
+    }
+
+    .tokenWrap{
+      margin-top: 10px;
+      display:flex;
+      flex-wrap:wrap;
+      gap: 8px;
+    }
+    .tok{
+      display:inline-flex;
+      align-items:center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(20,24,39,.12);
+      background: rgba(246,247,255,.65);
+      box-shadow: 0 8px 22px rgba(20,24,39,.06);
+      font-size: 13px;
+      font-weight: 800;
+      color: rgba(20,24,39,.78);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+    .tok.gen{
+      background: rgba(45,212,191,.14);
+      border-color: rgba(45,212,191,.25);
+      color: rgba(13,81,76,1);
+    }
+    .tok.newTok{
+      animation: popIn .22s ease-out;
+    }
+    @keyframes popIn{
+      0%{ transform: translateY(4px) scale(.96); opacity:0; }
+      100%{ transform: translateY(0) scale(1); opacity:1; }
+    }
+
+    .dividerTok{
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(20,24,39,.18);
+      background: rgba(255,255,255,.55);
+      color: rgba(20,24,39,.52);
+      font-weight: 900;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .addBranchRow{
+      margin-top: 8px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+
+    /* Center / tokens + LLM */
+    .center{
+      position:relative;
+      display:flex;
+      gap: 14px;
+      align-items:stretch;
+      min-height:0;
+    }
+
+    .tokenStack{
+      width: 210px;
+      background: rgba(255,255,255,.65);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 14px 34px rgba(20,24,39,.08);
+      padding: 12px;
+      overflow:auto;
+    }
+    .tokenStackTitle{
+      font-size: 12px;
+      font-weight: 800;
+      color: rgba(20,24,39,.58);
+      margin-bottom: 10px;
+    }
+    .stackCol{
+      display:flex;
+      flex-direction:column;
+      gap: 8px;
+    }
+    .stackTok{
+      background: rgba(246,247,255,.75);
+      border: 1px solid rgba(20,24,39,.12);
+      border-radius: 14px;
+      padding: 8px 10px;
+      box-shadow: 0 10px 26px rgba(20,24,39,.06);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+      font-size: 13px;
+      font-weight: 900;
+      color: rgba(20,24,39,.78);
+    }
+    .stackTok.gen{
+      background: rgba(45,212,191,.14);
+      border-color: rgba(45,212,191,.24);
+      color: rgba(13,81,76,1);
+    }
+
+    .llm{
+      flex:1;
+      background: rgba(255,255,255,.68);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 48px rgba(20,24,39,.10);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size: 22px;
+      font-weight: 900;
+      color: rgba(20,24,39,.62);
+      position:relative;
+      overflow:hidden;
+    }
+    .llm::before{
+      content:"";
+      position:absolute;
+      inset:-80px;
+      background:
+        radial-gradient(240px 240px at 30% 25%, rgba(109,94,252,.18), transparent 65%),
+        radial-gradient(240px 240px at 70% 65%, rgba(45,212,191,.16), transparent 60%),
+        radial-gradient(200px 200px at 30% 80%, rgba(251,191,36,.12), transparent 60%);
+      filter: blur(0px);
+    }
+    .llm span{
+      position:relative;
+      z-index:1;
+      letter-spacing:.8px;
+    }
+
+    /* Distribution */
+    .dist{
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+      min-height:0;
+    }
+
+    .distTop{
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,.70);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 28px rgba(20,24,39,.08);
+    }
+    .distTop .title{
+      font-weight: 900;
+      letter-spacing:.2px;
+    }
+    .distTop .kLabel{
+      font-size: 12px;
+      font-weight: 900;
+      color: rgba(20,24,39,.55);
+    }
+    .distTop input{
+      width: 80px;
+      padding: 10px 10px;
+      border-radius: 12px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .legend{
+      display:flex;
+      gap: 12px;
+      flex-wrap:wrap;
+      align-items:center;
+      padding: 0 4px;
+      color: rgba(20,24,39,.58);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .dot{
+      width: 12px; height: 12px;
+      border-radius: 999px;
+      display:inline-block;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .dot.base{ background: rgba(20,24,39,.14); border: 1px solid rgba(20,24,39,.16); }
+    .dot.final{ background: rgba(109,94,252,.65); border: 1px solid rgba(109,94,252,.25); }
+
+    .bars{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-right: 6px;
+    }
+
+    .barRow{
+      display:grid;
+      grid-template-columns: 140px 1fr 88px;
+      gap: 10px;
+      align-items:center;
+      padding: 10px 12px;
+      border: 1px solid rgba(20,24,39,.10);
+      background: rgba(255,255,255,.74);
+      border-radius: 16px;
+      box-shadow: 0 10px 24px rgba(20,24,39,.06);
+      margin-bottom: 10px;
+      cursor:pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .barRow:hover{
+      transform: translateY(-1px);
+      box-shadow: 0 16px 34px rgba(20,24,39,.08);
+      border-color: rgba(109,94,252,.22);
+    }
+    .barRow.selected{
+      border-color: rgba(109,94,252,.35);
+      box-shadow: 0 18px 44px rgba(109,94,252,.14);
+    }
+
+    .barTok{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-weight: 900;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      color: rgba(20,24,39,.78);
+    }
+    .barWrap{
+      position:relative;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(20,24,39,.06);
+      overflow:hidden;
+    }
+    .barBase, .barFinal{
+      position:absolute;
+      top:0; bottom:0;
+      left:0;
+      border-radius: 999px;
+      width: 0%;
+      transition: width .42s cubic-bezier(.2,.9,.2,1);
+    }
+    .barBase{
+      background: rgba(20,24,39,.14);
+    }
+    .barFinal{
+      background: linear-gradient(90deg, rgba(109,94,252,.85), rgba(45,212,191,.65));
+      box-shadow: 0 8px 18px rgba(109,94,252,.18);
+    }
+    .barProb{
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      font-weight: 900;
+      color: rgba(20,24,39,.62);
+    }
+
+    .otherRow{
+      border-style: dashed;
+      background: rgba(255,255,255,.58);
+      cursor: default;
+    }
+    .otherRow:hover{ transform:none; box-shadow: 0 10px 24px rgba(20,24,39,.06); border-color: rgba(20,24,39,.10); }
+    .otherRow .barFinal{ background: rgba(109,94,252,.35); box-shadow:none; }
+    .otherRow .barTok{ color: rgba(20,24,39,.55); }
+
+    .forceRow{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      padding: 12px 14px;
+      background: rgba(255,255,255,.70);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 28px rgba(20,24,39,.08);
+    }
+    .forceRow input{
+      font-weight: 650;
+    }
+
+    /* Bottom controls */
+    .controls{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap: 14px;
+      padding: 14px 18px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(10px);
+    }
+
+    .bigBtn{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 15px;
+      font-weight: 900;
+      border: 1px solid rgba(20,24,39,.12);
+      background: rgba(255,255,255,.72);
+      cursor:pointer;
+      box-shadow: 0 12px 28px rgba(20,24,39,.10);
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+      user-select:none;
+    }
+    .bigBtn:hover{ transform: translateY(-1px); box-shadow: 0 18px 40px rgba(20,24,39,.12); border-color: rgba(109,94,252,.25); }
+    .bigBtn.primary{
+      background: linear-gradient(135deg, rgba(109,94,252,.92), rgba(45,212,191,.60));
+      border-color: rgba(255,255,255,.28);
+      color:white;
+    }
+    .bigBtn svg{ width:18px; height:18px; }
+
+    /* Wires overlay */
+    .wires{
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+    }
+
+    .statusLine{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .muted{
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .hr{
+      height:1px;
+      background: rgba(20,24,39,.08);
+      margin: 12px 0;
+    }
+
+    .hint{
+      font-size: 12px;
+      color: rgba(20,24,39,.55);
+      font-weight: 650;
+      line-height: 1.35;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="card">
+        <h3>Model</h3>
+        <div class="row">
+          <input id="modelId" type="text" spellcheck="false" />
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="loadModelBtn" class="btn primary" style="flex:1;">Load model</button>
+          <div id="modelStatusPill" class="pill warn">LOADING</div>
+        </div>
+        <div class="statusLine" style="margin-top:10px;">
+          <div id="modelMeta" class="muted">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Decoding parameters</h3>
+
+        <div class="segmented" id="presetButtons">
+          <button class="btn" data-preset="greedy">Greedy</button>
+          <button class="btn active" data-preset="balanced">Balanced</button>
+          <button class="btn" data-preset="reliable">Reliable</button>
+          <button class="btn" data-preset="creative">Creative</button>
+          <button class="btn" data-preset="custom">Custom</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="col" id="customControls">
+          <div>
+            <label>Temperature</label>
+            <div class="sliderRow">
+              <input id="temperature" type="range" min="0" max="2" step="0.01" />
+              <div class="smallVal" id="temperatureVal"></div>
+            </div>
+          </div>
+
+          <div>
+            <label>Top‑p (nucleus)</label>
+            <div class="sliderRow">
+              <input id="topP" type="range" min="0" max="1" step="0.01" />
+              <div class="smallVal" id="topPVal"></div>
+            </div>
+          </div>
+
+          <div>
+            <label>Repetition penalty</label>
+            <div class="sliderRow">
+              <input id="repetitionPenalty" type="range" min="1" max="2" step="0.01" />
+              <div class="smallVal" id="repetitionPenaltyVal"></div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div style="flex:1;">
+              <label>Presence penalty</label>
+              <input id="presencePenalty" type="number" step="0.1" min="-2" max="2" />
+            </div>
+            <div style="flex:1;">
+              <label>Frequency penalty</label>
+              <input id="frequencyPenalty" type="number" step="0.1" min="-2" max="2" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div style="flex:1;">
+              <label>Seed (optional)</label>
+              <input id="seed" type="number" step="1" placeholder="—" />
+            </div>
+            <div style="flex:1;">
+              <label>Stop sequences</label>
+              <input id="stopSeq" type="text" placeholder="e.g. \n\n or ###" />
+            </div>
+          </div>
+
+          <div class="hint">
+            Stop sequences are checked against the decoded assistant completion. Sampling always stops at the model EOS token.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Step speed</h3>
+        <label>Playback speed</label>
+        <div class="sliderRow">
+          <input id="stepSpeed" type="range" min="120" max="2000" step="10" />
+          <div class="smallVal" id="stepSpeedVal"></div>
+        </div>
+        <div class="hint">Controls how fast the play button advances one token at a time.</div>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="titleBar">
+        <div>
+          <h1>Next Token Visualization</h1>
+          <div class="sub">Token-by-token sampling, nucleus filtering, temperature scaling, and penalties — in one view.</div>
+        </div>
+        <div class="statusLine">
+          <div class="pill" id="serverPill">Server</div>
+          <div class="muted" id="serverMsg">—</div>
+        </div>
+      </div>
+
+      <div class="viz" id="viz">
+        <svg class="wires" id="wires"></svg>
+
+        <div class="vizGrid">
+          <div>
+            <div class="branches" id="branches"></div>
+            <div class="addBranchRow">
+              <button id="newBranchBtn" class="btn ghost" style="flex:1;">＋ New input</button>
+              <button id="clearBtn" class="btn danger">Clear</button>
+            </div>
+          </div>
+
+          <div class="center">
+            <div class="tokenStack" id="tokenStackCard">
+              <div class="tokenStackTitle">Current tokens</div>
+              <div class="stackCol" id="tokenStack"></div>
+            </div>
+            <div class="llm">
+              <span>LLM</span>
+            </div>
+          </div>
+
+          <div class="dist">
+            <div class="distTop">
+              <div class="kLabel">Top‑k</div>
+              <input id="topK" type="number" min="1" max="50" step="1" />
+              <div class="spacer"></div>
+              <div class="title">Next token distribution</div>
+            </div>
+
+            <div class="legend">
+              <span><span class="dot base"></span>Raw model</span>
+              <span><span class="dot final"></span>After decoding</span>
+              <span class="muted" id="keptInfo"></span>
+            </div>
+
+            <div class="bars" id="bars"></div>
+
+            <div class="forceRow">
+              <input id="forceText" type="text" placeholder="Force token / text (appends immediately)" />
+              <button id="forceBtn" class="btn primary">Force</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="playBtn" class="bigBtn primary">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7Z" fill="currentColor"/></svg>
+          <span id="playBtnLabel">Play</span>
+        </button>
+        <button id="stepBtn" class="bigBtn">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 6h2v12H7V6Zm4.5 6 9-6v12l-9-6Z" fill="currentColor"/></svg>
+          Step
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  const state = {
+    model: null,
+    modelStatus: null,
+    topK: 10,
+    stepSpeedMs: 650,
+    playing: false,
+    playTimer: null,
+    preset: "balanced",
+    params: {
+      greedy: false,
+      temperature: 0.7,
+      top_p: 0.8,
+      repetition_penalty: 1.05,
+      presence_penalty: 0.0,
+      frequency_penalty: 0.0,
+      seed: null,
+      stop_sequences: []
+    },
+    branches: [],
+    activeBranchId: null,
+    lastDist: null,
+    serverOk: false,
+  };
+
+  const presets = {
+    greedy:   { greedy: true,  temperature: 1.0, top_p: 1.0, repetition_penalty: 1.0, presence_penalty: 0.0, frequency_penalty: 0.0 },
+    reliable: { greedy: false, temperature: 0.25, top_p: 0.70, repetition_penalty: 1.10, presence_penalty: 0.0, frequency_penalty: 0.0 },
+    balanced: { greedy: false, temperature: 0.70, top_p: 0.80, repetition_penalty: 1.05, presence_penalty: 0.0, frequency_penalty: 0.0 },
+    creative: { greedy: false, temperature: 1.05, top_p: 0.95, repetition_penalty: 1.02, presence_penalty: 0.2, frequency_penalty: 0.1 }
+  };
+
+  function uid(){
+    return "b_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
+  }
+
+  function fmtProb(p){
+    if (p === null || p === undefined) return "—";
+    const x = Math.max(0, Math.min(1, Number(p)));
+    return x.toFixed(3);
+  }
+
+  async function apiGet(path){
+    const res = await fetch(path);
+    if(!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  async function apiPost(path, data){
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if(!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  function setServerStatus(ok, msg){
+    state.serverOk = ok;
+    $("serverPill").className = "pill " + (ok ? "ok" : "bad");
+    $("serverPill").textContent = ok ? "Server OK" : "Server error";
+    $("serverMsg").textContent = msg || "—";
+  }
+
+  function setModelStatus(status){
+    state.modelStatus = status;
+    const pill = $("modelStatusPill");
+    if(status.loading){
+      pill.className = "pill warn";
+      pill.textContent = "LOADING";
+    }else if(status.ready){
+      pill.className = "pill ok";
+      pill.textContent = "READY";
+    }else{
+      pill.className = "pill bad";
+      pill.textContent = "ERROR";
+    }
+
+    const meta = [];
+    if(status.model_id) meta.push(status.model_id);
+    if(status.device) meta.push("· " + status.device + " / " + status.dtype);
+    if(status.has_chat_template) meta.push("· chat template");
+    if(status.eos_token_id !== null && status.eos_token_id !== undefined) meta.push("· eos=" + status.eos_token_id);
+    $("modelMeta").textContent = meta.join(" ");
+  }
+
+  async function pollModelReady(){
+    for(;;){
+      let st;
+      try{
+        st = await apiGet("/api/model/status");
+        setServerStatus(true, "");
+      }catch(e){
+        setServerStatus(false, String(e).slice(0,160));
+        await new Promise(r => setTimeout(r, 700));
+        continue;
+      }
+      setModelStatus(st);
+      if(st.ready) return st;
+
+      // If loading stopped and the model isn't ready, surface the error instead of looping forever.
+      if(!st.loading && !st.ready){
+        const errMsg = (st.error || "Model failed to load.").split("")[0];
+        throw new Error(errMsg);
+      }
+
+      const msg = (st.error || "Loading model…").split("")[0];
+      setServerStatus(true, msg);
+      await new Promise(r => setTimeout(r, 700));
+    }
+  }
+
+  function getActiveBranch(){
+    return state.branches.find(b => b.id === state.activeBranchId) || null;
+  }
+
+  function stopPlayback(){
+    state.playing = false;
+    if(state.playTimer) clearTimeout(state.playTimer);
+    state.playTimer = null;
+    $("playBtnLabel").textContent = "Play";
+    $("playBtn").querySelector("svg").innerHTML = '<path d="M8 5v14l11-7-11-7Z" fill="currentColor"/>';
+  }
+
+  function applyPreset(name){
+    state.preset = name;
+    const btns = $("presetButtons").querySelectorAll(".btn");
+    btns.forEach(b => b.classList.toggle("active", b.dataset.preset === name));
+    if(name !== "custom"){
+      const p = presets[name] || presets.balanced;
+      state.params = {
+        ...state.params,
+        greedy: p.greedy,
+        temperature: p.temperature,
+        top_p: p.top_p,
+        repetition_penalty: p.repetition_penalty,
+        presence_penalty: p.presence_penalty,
+        frequency_penalty: p.frequency_penalty,
+      };
+    }
+    syncControlsFromState();
+    updatePreviewDebounced(true);
+  }
+
+  function markCustomPreset(){
+    // If the user tweaks any decoding control, switch to "custom" unless greedy is enabled.
+    if(state.params.greedy) return;
+    if(state.preset === "custom") return;
+    state.preset = "custom";
+    $("presetButtons").querySelectorAll(".btn").forEach(b => b.classList.toggle("active", b.dataset.preset === "custom"));
+  }
+
+  function syncControlsFromState(){
+    $("temperature").value = state.params.temperature;
+    $("topP").value = state.params.top_p;
+    $("repetitionPenalty").value = state.params.repetition_penalty;
+    $("presencePenalty").value = state.params.presence_penalty;
+    $("frequencyPenalty").value = state.params.frequency_penalty;
+    $("temperatureVal").textContent = Number(state.params.temperature).toFixed(2);
+    $("topPVal").textContent = Number(state.params.top_p).toFixed(2);
+    $("repetitionPenaltyVal").textContent = Number(state.params.repetition_penalty).toFixed(2);
+
+    $("topK").value = state.topK;
+    $("stepSpeed").value = state.stepSpeedMs;
+    $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
+
+    // Seed
+    $("seed").value = (state.params.seed === null || state.params.seed === undefined) ? "" : String(state.params.seed);
+
+    // Stop sequences: for UX we keep a single text input. Split by |
+    const s = (state.params.stop_sequences || []).join(" | ");
+    $("stopSeq").value = s;
+
+    // Disable controls when greedy
+    const disabled = !!state.params.greedy;
+    ["temperature","topP"].forEach(id => $(id).disabled = disabled);
+  }
+
+  function readParamsFromControls(){
+    state.params.temperature = Number($("temperature").value);
+    state.params.top_p = Number($("topP").value);
+    state.params.repetition_penalty = Number($("repetitionPenalty").value);
+    state.params.presence_penalty = Number($("presencePenalty").value || 0);
+    state.params.frequency_penalty = Number($("frequencyPenalty").value || 0);
+
+    const seedStr = ($("seed").value || "").trim();
+    state.params.seed = seedStr === "" ? null : Number(seedStr);
+
+    const stopRaw = ($("stopSeq").value || "").trim();
+    state.params.stop_sequences = stopRaw === "" ? [] : stopRaw.split("|").map(s => s.trim()).filter(Boolean);
+
+    // Greedy is set only through preset button
+  }
+
+  function renderBranches(){
+    const wrap = $("branches");
+    wrap.innerHTML = "";
+
+    state.branches.forEach((b, idx) => {
+      const div = document.createElement("div");
+      div.className = "branch " + (b.id === state.activeBranchId ? "active" : "inactive");
+      div.dataset.branchId = b.id;
+
+      const header = document.createElement("div");
+      header.className = "branchHeader";
+
+      const title = document.createElement("div");
+      title.className = "branchTitle";
+      title.textContent = "Input " + (idx + 1);
+
+      const meta = document.createElement("div");
+      meta.className = "branchMeta";
+      const nTok = (b.promptTokens?.length || 0) + (b.completionTokens?.length || 0);
+      meta.textContent = "· " + nTok + " tokens";
+
+      header.appendChild(title);
+      header.appendChild(meta);
+
+      if(b.id === state.activeBranchId){
+        const fork = document.createElement("button");
+        fork.className = "btn forkBtn";
+        fork.textContent = "Fork";
+        fork.addEventListener("click", (e) => {
+          e.stopPropagation();
+          forkBranch(b.id);
+        });
+        header.appendChild(fork);
+      }
+
+      div.appendChild(header);
+
+      const ta = document.createElement("textarea");
+      ta.placeholder = "Enter a prompt…";
+      ta.value = b.prompt;
+      ta.addEventListener("focus", () => selectBranch(b.id));
+      ta.addEventListener("click", () => selectBranch(b.id));
+      ta.addEventListener("input", () => {
+        b.prompt = ta.value;
+        // Editing prompt resets completion.
+        b.completionIds = [];
+        b.completionTokens = [];
+        b.done = false;
+        b.resetRng = true;
+        updateBranchTokensSoon(b.id);
+      });
+      div.appendChild(ta);
+
+      const tokWrap = document.createElement("div");
+      tokWrap.className = "tokenWrap";
+      const promptToks = b.promptTokens || [];
+      const genToks = b.completionTokens || [];
+
+      promptToks.forEach(t => {
+        const s = document.createElement("span");
+        s.className = "tok";
+        s.textContent = t.display;
+        tokWrap.appendChild(s);
+      });
+
+      if(genToks.length){
+        const sep = document.createElement("span");
+        sep.className = "dividerTok";
+        sep.textContent = "⇢";
+        tokWrap.appendChild(sep);
+      }
+
+      genToks.forEach(t => {
+        const s = document.createElement("span");
+        s.className = "tok gen";
+        s.textContent = t.display;
+        tokWrap.appendChild(s);
+      });
+
+      div.appendChild(tokWrap);
+
+      div.addEventListener("click", () => selectBranch(b.id));
+      wrap.appendChild(div);
+    });
+
+    // After rendering, wires need update
+    requestAnimationFrame(drawWires);
+  }
+
+  function renderTokenStack(){
+    const b = getActiveBranch();
+    const stack = $("tokenStack");
+    stack.innerHTML = "";
+    if(!b){
+      requestAnimationFrame(drawWires);
+      return;
+    }
+    const tokens = [...(b.promptTokens || []), ...(b.completionTokens || [])];
+    tokens.forEach((t, i) => {
+      const div = document.createElement("div");
+      div.className = "stackTok " + (i >= (b.promptTokens||[]).length ? "gen" : "");
+      div.textContent = t.display;
+      stack.appendChild(div);
+    });
+    requestAnimationFrame(drawWires);
+  }
+
+  function renderDistribution(dist, highlightTokenId=null){
+    state.lastDist = dist;
+    const bars = $("bars");
+    bars.innerHTML = "";
+
+    if(!dist){
+      bars.innerHTML = '<div class="muted" style="padding:10px 4px;">No distribution yet.</div>';
+      $("keptInfo").textContent = "";
+      return;
+    }
+
+    $("keptInfo").textContent = dist.kept_token_count ? ("· nucleus keeps " + dist.kept_token_count + " tokens") : "";
+
+    const maxP = Math.max(...dist.tokens.map(t => t.p_final || 0), dist.other_p_final || 0, 1e-9);
+
+    dist.tokens.forEach(t => {
+      const row = document.createElement("div");
+      row.className = "barRow" + (highlightTokenId === t.id ? " selected" : "");
+      row.dataset.tokenId = t.id;
+
+      const tok = document.createElement("div");
+      tok.className = "barTok";
+      tok.textContent = t.display;
+
+      const wrap = document.createElement("div");
+      wrap.className = "barWrap";
+
+      const base = document.createElement("div");
+      base.className = "barBase";
+      const final = document.createElement("div");
+      final.className = "barFinal";
+
+      // Scale bar widths relative to 1.0 (probability), not maxP, so it's interpretable.
+      base.style.width = (Math.max(0, Math.min(1, t.p_base)) * 100).toFixed(2) + "%";
+      final.style.width = (Math.max(0, Math.min(1, t.p_final)) * 100).toFixed(2) + "%";
+
+      wrap.appendChild(base);
+      wrap.appendChild(final);
+
+      const prob = document.createElement("div");
+      prob.className = "barProb";
+      prob.textContent = fmtProb(t.p_final);
+
+      row.appendChild(tok);
+      row.appendChild(wrap);
+      row.appendChild(prob);
+
+      row.addEventListener("click", () => {
+        forceToken(t.id);
+      });
+
+      bars.appendChild(row);
+    });
+
+    // Other mass row
+    const other = document.createElement("div");
+    other.className = "barRow otherRow";
+    other.innerHTML = `
+      <div class="barTok">Other</div>
+      <div class="barWrap">
+        <div class="barBase"></div>
+        <div class="barFinal"></div>
+      </div>
+      <div class="barProb">${fmtProb(dist.other_p_final)}</div>
+    `;
+    const otherBase = other.querySelector(".barBase");
+    const otherFinal = other.querySelector(".barFinal");
+    otherBase.style.width = (Math.max(0, Math.min(1, dist.other_p_base)) * 100).toFixed(2) + "%";
+    otherFinal.style.width = (Math.max(0, Math.min(1, dist.other_p_final)) * 100).toFixed(2) + "%";
+    bars.appendChild(other);
+  }
+
+  function drawWires(){
+    const svg = $("wires");
+    const viz = $("viz");
+    const activeBranchEl = document.querySelector('.branch.active');
+    const stackCard = $("tokenStackCard");
+
+    if(!activeBranchEl || !stackCard){
+      svg.innerHTML = "";
+      return;
+    }
+
+    const vizRect = viz.getBoundingClientRect();
+    const aRect = activeBranchEl.getBoundingClientRect();
+    const stackRect = stackCard.getBoundingClientRect();
+
+    // Starting point: right-middle of active branch card.
+    const x1 = aRect.right - vizRect.left;
+    const y1 = aRect.top - vizRect.top + aRect.height * 0.45;
+
+    // Endpoints: left side of each token in stack
+    const tokenEls = $("tokenStack").querySelectorAll(".stackTok");
+    const paths = [];
+
+    tokenEls.forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const x2 = r.left - vizRect.left;
+      const y2 = r.top - vizRect.top + r.height * 0.5;
+
+      const dx = Math.max(80, (x2 - x1) * 0.55);
+      const c1x = x1 + dx;
+      const c1y = y1;
+      const c2x = x2 - dx;
+      const c2y = y2;
+
+      const d = `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+      const opacity = 0.18 + Math.min(0.22, i * 0.012);
+      paths.push(`<path d="${d}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2.2" stroke-linecap="round"/>`);
+    });
+
+    // Also draw a subtle connector into the LLM box
+    const llmEl = document.querySelector(".llm");
+    if(llmEl){
+      const r = llmEl.getBoundingClientRect();
+      const x2 = r.left - vizRect.left;
+      const y2 = r.top - vizRect.top + r.height * 0.5;
+      const xMid = stackRect.right - vizRect.left;
+      const yMid = y2;
+
+      const d2 = `M ${xMid} ${yMid} C ${xMid+60} ${yMid}, ${x2-60} ${y2}, ${x2} ${y2}`;
+      paths.push(`<path d="${d2}" fill="none" stroke="rgba(45,212,191,0.22)" stroke-width="3.2" stroke-linecap="round"/>`);
+    }
+
+    svg.setAttribute("viewBox", `0 0 ${vizRect.width} ${vizRect.height}`);
+    svg.innerHTML = paths.join("");
+  }
+
+  function selectBranch(branchId){
+    if(state.activeBranchId === branchId) return;
+    stopPlayback();
+    state.activeBranchId = branchId;
+    renderBranches();
+    renderTokenStack();
+    updatePreviewDebounced(true);
+  }
+
+  function newBranch(copyFrom=null, initialPrompt=""){
+    const b = {
+      id: uid(),
+      prompt: (initialPrompt || ""),
+      completionIds: [],
+      promptTokens: [],
+      completionTokens: [],
+      done: false,
+      resetRng: true,
+    };
+    if(copyFrom){
+      b.prompt = copyFrom.prompt;
+      b.completionIds = [...(copyFrom.completionIds || [])];
+      b.promptTokens = [...(copyFrom.promptTokens || [])];
+      b.completionTokens = [...(copyFrom.completionTokens || [])];
+      b.done = copyFrom.done || false;
+      b.resetRng = true;
+    }
+    state.branches.push(b);
+    state.activeBranchId = b.id;
+    renderBranches();
+    renderTokenStack();
+    updatePreviewDebounced(true);
+  }
+
+  function forkBranch(branchId){
+    const src = state.branches.find(b => b.id === branchId);
+    if(!src) return;
+    newBranch(src);
+  }
+
+  function clearActive(){
+    const b = getActiveBranch();
+    if(!b) return;
+    stopPlayback();
+    b.prompt = "";
+    b.completionIds = [];
+    b.promptTokens = [];
+    b.completionTokens = [];
+    b.done = false;
+    b.resetRng = true;
+    renderBranches();
+    renderTokenStack();
+    renderDistribution(null);
+    updatePreviewDebounced(true);
+  }
+
+  let previewTimer = null;
+  function updatePreviewDebounced(immediate=false){
+    if(previewTimer) clearTimeout(previewTimer);
+    const delay = immediate ? 0 : 350;
+    previewTimer = setTimeout(() => updatePreview(), delay);
+  }
+
+  async function updateBranchTokensSoon(branchId){
+    // Only preview active branch; inactive branches keep their tokens until selected.
+    if(branchId !== state.activeBranchId) {
+      renderBranches();
+      return;
+    }
+    updatePreviewDebounced(false);
+  }
+
+  async function updatePreview(){
+    const b = getActiveBranch();
+    if(!b) return;
+
+    try{
+      readParamsFromControls();
+      // Do not let greedy be overridden by sliders; it's only via preset.
+      if(state.preset === "greedy") state.params.greedy = true;
+
+      const res = await apiPost("/api/preview", {
+        branch_id: b.id,
+        prompt: b.prompt,
+        completion_ids: b.completionIds,
+        top_k: state.topK,
+        params: state.params
+      });
+
+      setServerStatus(true, res.model.model_id ? "" : "—");
+
+      // Update tokens for active branch
+      b.promptTokens = res.prompt_tokens || [];
+      b.completionTokens = res.completion_tokens || [];
+
+      renderBranches();
+      renderTokenStack();
+      renderDistribution(res.dist);
+
+    }catch(e){
+      setServerStatus(false, String(e).slice(0,180));
+      renderDistribution(null);
+    }
+  }
+
+  async function forceToken(tokenId){
+    const b = getActiveBranch();
+    if(!b || b.done) return;
+    await doStep({ force_token_id: tokenId });
+  }
+
+  async function forceText(){
+    const txt = ($("forceText").value || "");
+    if(txt.trim() === "") return;
+    const b = getActiveBranch();
+    if(!b || b.done) return;
+    $("forceText").value = "";
+    await doStep({ force_text: txt });
+  }
+
+  async function doStep(extra={}){
+    const b = getActiveBranch();
+    if(!b || b.done) return;
+
+    try{
+      readParamsFromControls();
+      if(state.preset === "greedy") state.params.greedy = true;
+
+      const res = await apiPost("/api/step", {
+        branch_id: b.id,
+        reset_rng: !!b.resetRng,
+        prompt: b.prompt,
+        completion_ids: b.completionIds,
+        top_k: state.topK,
+        params: state.params,
+        ...extra
+      });
+      b.resetRng = false;
+
+      // Show distribution (pre-step)
+      renderDistribution(res.dist, res.selected ? res.selected.id : null);
+
+      // Append tokens
+      const appended = res.appended || [];
+      if(appended.length){
+        // Update token ids: server returns only new_completion_ids
+        b.completionIds = res.new_completion_ids || b.completionIds;
+        // Also update token pills incrementally for smooth animation
+        appended.forEach(t => {
+          b.completionTokens.push({ ...t, _new:true });
+        });
+      }
+
+      // Update UI
+      renderBranches();
+      renderTokenStack();
+      // Mark new tokens with animation class in the branch card
+      markNewTokenAnimations();
+
+      if(res.done){
+        b.done = true;
+        stopPlayback();
+        setServerStatus(true, "Stopped: " + (res.stop_reason || "done"));
+        return;
+      }
+
+      // Fetch next distribution (post-step) to keep bars moving
+      setTimeout(() => updatePreviewDebounced(true), 180);
+
+    }catch(e){
+      stopPlayback();
+      setServerStatus(false, String(e).slice(0,180));
+    }
+  }
+
+  function markNewTokenAnimations(){
+    // Add a brief animation class to newly appended completion tokens in branch cards.
+    const active = document.querySelector('.branch.active');
+    if(!active) return;
+    const toks = active.querySelectorAll('.tok.gen');
+    // Mark the last few tokens as new based on state data
+    const b = getActiveBranch();
+    if(!b) return;
+    const nNew = (b.completionTokens || []).filter(t => t._new).length;
+    if(nNew <= 0) return;
+    // Apply class to last nNew gen tokens
+    for(let i=toks.length - nNew; i<toks.length; i++){
+      if(i>=0 && toks[i]) toks[i].classList.add("newTok");
+    }
+    // Clear _new flags
+    (b.completionTokens || []).forEach(t => { delete t._new; });
+  }
+
+  async function playLoop(){
+    if(!state.playing) return;
+    await doStep();
+    if(!state.playing) return;
+    state.playTimer = setTimeout(playLoop, state.stepSpeedMs);
+  }
+
+  function togglePlay(){
+    const b = getActiveBranch();
+    if(!b) return;
+    if(b.done){
+      setServerStatus(true, "This branch is done. Edit the prompt or fork to continue.");
+      return;
+    }
+    state.playing = !state.playing;
+    if(state.playing){
+      $("playBtnLabel").textContent = "Pause";
+      $("playBtn").querySelector("svg").innerHTML = '<path d="M7 6h3v12H7V6Zm7 0h3v12h-3V6Z" fill="currentColor"/>';
+      playLoop();
+    }else{
+      stopPlayback();
+    }
+  }
+
+  function wireEvents(){
+    $("loadModelBtn").addEventListener("click", async () => {
+      stopPlayback();
+      const id = ($("modelId").value || "").trim();
+      if(!id) return;
+      try{
+        await apiPost("/api/model/load", { model_id: id });
+        setModelStatus({loading:true,ready:false,error:null,model_id:id});
+        await pollModelReady();
+        updatePreviewDebounced(true);
+      }catch(e){
+        setServerStatus(false, String(e).slice(0,180));
+      }
+    });
+
+    $("newBranchBtn").addEventListener("click", () => newBranch());
+    $("clearBtn").addEventListener("click", () => clearActive());
+
+    // Presets
+    $("presetButtons").querySelectorAll(".btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const p = btn.dataset.preset;
+        if(p === "greedy"){
+          state.params.greedy = true;
+          applyPreset("greedy");
+          return;
+        }
+        state.params.greedy = false;
+        applyPreset(p);
+      });
+    });
+
+    // Sliders + inputs
+    ["temperature","topP","repetitionPenalty"].forEach(id => {
+      $(id).addEventListener("input", () => {
+        markCustomPreset();
+        readParamsFromControls();
+        $("temperatureVal").textContent = Number($("temperature").value).toFixed(2);
+        $("topPVal").textContent = Number($("topP").value).toFixed(2);
+        $("repetitionPenaltyVal").textContent = Number($("repetitionPenalty").value).toFixed(2);
+        updatePreviewDebounced(false);
+      });
+    });
+
+    ["presencePenalty","frequencyPenalty","seed","stopSeq"].forEach(id => {
+      $(id).addEventListener("input", () => {
+        markCustomPreset();
+        readParamsFromControls();
+        // Reset RNG when seed changes
+        const b = getActiveBranch();
+        if(b) b.resetRng = true;
+        updatePreviewDebounced(false);
+      });
+    });
+
+    $("topK").addEventListener("input", () => {
+      state.topK = Math.max(1, Math.min(50, Number($("topK").value || 10)));
+      updatePreviewDebounced(true);
+    });
+
+    $("stepSpeed").addEventListener("input", () => {
+      state.stepSpeedMs = Math.max(80, Number($("stepSpeed").value || 650));
+      $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
+    });
+
+    $("forceBtn").addEventListener("click", forceText);
+    $("forceText").addEventListener("keydown", (e) => {
+      if(e.key === "Enter"){
+        e.preventDefault();
+        forceText();
+      }
+    });
+
+    $("playBtn").addEventListener("click", togglePlay);
+    $("stepBtn").addEventListener("click", () => doStep());
+
+    window.addEventListener("resize", () => requestAnimationFrame(drawWires));
+  }
+
+  async function init(){
+    $("modelId").value = "Qwen/Qwen2.5-0.5B-Instruct";
+    $("topK").value = state.topK;
+    $("stepSpeed").value = state.stepSpeedMs;
+    $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
+
+    syncControlsFromState();
+
+    wireEvents();
+
+    // Initial branch (pre-filled for the live demo)
+    newBranch(null, "The capital of France is");
+
+    // Poll model status
+    try{
+      const st = await pollModelReady();
+      $("modelId").value = st.model_id || $("modelId").value;
+      setServerStatus(true, "Ready");
+      updatePreviewDebounced(true);
+    }catch(e){
+      setServerStatus(false, String(e).slice(0,180));
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
