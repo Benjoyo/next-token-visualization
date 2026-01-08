@@ -20,8 +20,8 @@
       --shadow2: none;
       --radius: 18px;
       --radius2: 14px;
-      --accent-rgb: 37,99,235;       /* blue */
-      --accent2-rgb: 13,148,136;     /* teal */
+      --accent-rgb: 0,89,209;       /* blue */
+      --accent2-rgb: 82,182,154;     /* teal */
       --accent3-rgb: 245,158,11;     /* amber */
       --accent: rgb(var(--accent-rgb));
       --accent2: rgb(var(--accent2-rgb));
@@ -30,7 +30,7 @@
       --specialBorder: rgba(var(--accent3-rgb),.45);
       --specialText: #92400e;
       --token-stack-width: 210px;
-      --llm-width: 280px;
+      --llm-width: 210px;
       --gap-min: 16px;
       --danger:#ef4444;
       --ok:#22c55e;
@@ -85,6 +85,38 @@
       letter-spacing:.2px;
       color: rgba(20,24,39,.85);
       font-weight: 700;
+    }
+    .cardHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom: 10px;
+    }
+    .cardHeader h3{
+      margin:0;
+    }
+    .cardToggle{
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.8);
+      border-radius: 999px;
+      padding: 4px 6px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      transition: transform .12s ease, border-color .18s ease;
+    }
+    .cardToggle svg{ width:14px; height:14px; }
+    .cardToggle:hover{
+      transform: translateY(-1px);
+      border-color: rgba(var(--accent-rgb),.25);
+    }
+    .card.collapsed{
+      padding-bottom: 10px;
+    }
+    .card.collapsed .cardBody{
+      display:none;
     }
 
     .row{
@@ -326,7 +358,13 @@
       background: rgba(var(--accent2-rgb),.14);
       color: rgba(15,75,70,1);
       border: 1px solid rgba(var(--accent2-rgb),.22);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      line-height: 1;
     }
+    .forkBtn svg{ width:16px; height:16px; display:block; }
     .forkBtn:hover{
       box-shadow: none;
     }
@@ -501,17 +539,26 @@
     .llm{
       flex: 0 0 var(--llm-width);
       width: var(--llm-width);
-      background: rgba(var(--accent-rgb), .22);
-      border: 1px solid rgba(var(--accent-rgb), .35);
+      background: rgba(var(--accent-rgb), .35);
+      border: 1px solid rgba(var(--accent-rgb), .5);
       border-radius: var(--radius);
       display:flex;
       align-items:center;
       justify-content:center;
       font-size: 22px;
       font-weight: 900;
-      color: #ffffff;
+      color: #03045e;
       position:relative;
       overflow:hidden;
+      cursor: pointer;
+    }
+    .llm.off{
+      background: rgba(var(--accent-rgb), .08);
+      border-color: rgba(15,23,42,.12);
+      color: rgba(100,116,139,.9);
+    }
+    .llm.off span{
+      text-decoration: line-through;
     }
     .llm span{
       position:relative;
@@ -525,6 +572,11 @@
       flex-direction:column;
       gap: 12px;
       min-height:0;
+    }
+    .dist.off{
+      opacity: .45;
+      filter: grayscale(.35);
+      pointer-events: none;
     }
 
     .distTop{
@@ -579,6 +631,7 @@
       min-height:0;
       overflow:auto;
       padding-right: 6px;
+      padding-top: 1px;
     }
 
     .barRow{
@@ -936,10 +989,10 @@
       <div class="card">
         <h3>Model</h3>
         <div class="row">
-          <input id="modelId" type="text" spellcheck="false" />
+          <input id="modelId" type="text" spellcheck="false" title="Hugging Face model ID (e.g. Qwen/Qwen2.5-0.5B-Instruct)" />
         </div>
         <div class="row" style="margin-top:10px;">
-          <button id="loadModelBtn" class="btn primary" style="flex:1;">Load model</button>
+          <button id="loadModelBtn" class="btn primary" style="flex:1;" title="Load the model ID above into the server">Load model</button>
           <div id="modelStatusPill" class="pill warn">LOADING</div>
         </div>
         <div class="statusLine" style="margin-top:10px;">
@@ -948,79 +1001,93 @@
       </div>
 
       <div class="card">
-        <h3>Decoding parameters</h3>
-
-        <div class="segmented" id="presetButtons">
-          <button class="btn" data-preset="greedy">Greedy</button>
-          <button class="btn active" data-preset="balanced">Balanced</button>
-          <button class="btn" data-preset="reliable">Reliable</button>
-          <button class="btn" data-preset="creative">Creative</button>
-          <button class="btn" data-preset="custom">Custom</button>
+        <div class="cardHeader">
+          <h3>Decoding parameters</h3>
+          <button class="cardToggle" data-target="decodingCard" title="Collapse decoding controls">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
 
-        <div class="hr"></div>
-
-        <div class="col" id="customControls">
-          <div>
-            <label>Temperature</label>
-            <div class="sliderRow">
-              <input id="temperature" type="range" min="0" max="2" step="0.01" />
-              <div class="smallVal" id="temperatureVal"></div>
-            </div>
+        <div class="cardBody" id="decodingCard">
+          <div class="segmented" id="presetButtons">
+          <button class="btn" data-preset="greedy" title="Always pick the highest-prob token">Greedy</button>
+          <button class="btn active" data-preset="balanced" title="Balanced sampling defaults">Balanced</button>
+          <button class="btn" data-preset="reliable" title="Lower randomness for consistency">Reliable</button>
+          <button class="btn" data-preset="creative" title="Higher randomness for variety">Creative</button>
+          <button class="btn" data-preset="custom" title="Use the sliders below">Custom</button>
           </div>
 
-          <div>
-            <label>Top‑p (nucleus)</label>
-            <div class="sliderRow">
-              <input id="topP" type="range" min="0" max="1" step="0.01" />
-              <div class="smallVal" id="topPVal"></div>
-            </div>
-          </div>
+          <div class="hr"></div>
 
-          <div>
-            <label>Repetition penalty</label>
-            <div class="sliderRow">
-              <input id="repetitionPenalty" type="range" min="1" max="2" step="0.01" />
-              <div class="smallVal" id="repetitionPenaltyVal"></div>
+          <div class="col" id="customControls">
+            <div>
+              <label>Temperature</label>
+              <div class="sliderRow">
+          <input id="temperature" type="range" min="0" max="2" step="0.01" title="Randomness (lower = more deterministic)" />
+                <div class="smallVal" id="temperatureVal"></div>
+              </div>
             </div>
-          </div>
 
-          <div class="row">
-            <div style="flex:1;">
-              <label>Presence penalty</label>
-              <input id="presencePenalty" type="number" step="0.1" min="-2" max="2" />
+            <div>
+              <label>Top‑p (nucleus)</label>
+              <div class="sliderRow">
+          <input id="topP" type="range" min="0" max="1" step="0.01" title="Nucleus threshold (keep cumulative probability)" />
+                <div class="smallVal" id="topPVal"></div>
+              </div>
             </div>
-            <div style="flex:1;">
-              <label>Frequency penalty</label>
-              <input id="frequencyPenalty" type="number" step="0.1" min="-2" max="2" />
-            </div>
-          </div>
 
-          <div class="row">
-            <div style="flex:1;">
-              <label>Seed (optional)</label>
-              <input id="seed" type="number" step="1" placeholder="—" />
+            <div>
+              <label>Repetition penalty</label>
+              <div class="sliderRow">
+          <input id="repetitionPenalty" type="range" min="1" max="2" step="0.01" title="Penalize repeated tokens" />
+                <div class="smallVal" id="repetitionPenaltyVal"></div>
+              </div>
             </div>
-            <div style="flex:1;">
-              <label>Stop sequences</label>
-              <input id="stopSeq" type="text" placeholder="e.g. \n\n or ###" />
-            </div>
-          </div>
 
-          <div class="hint">
-            Stop sequences are checked against the decoded assistant completion. Sampling always stops at the model EOS token.
+            <div class="row">
+              <div style="flex:1;">
+                <label>Presence penalty</label>
+              <input id="presencePenalty" type="number" step="0.1" min="-2" max="2" title="Penalize already-seen tokens" />
+              </div>
+              <div style="flex:1;">
+                <label>Frequency penalty</label>
+              <input id="frequencyPenalty" type="number" step="0.1" min="-2" max="2" title="Penalize repeated frequency" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div style="flex:1;">
+                <label>Seed (optional)</label>
+              <input id="seed" type="number" step="1" placeholder="—" title="Fix randomness for repeatable results" />
+              </div>
+              <div style="flex:1;">
+                <label>Stop sequences</label>
+              <input id="stopSeq" type="text" placeholder="e.g. \n\n or ###" title="Stop when these sequences appear" />
+              </div>
+            </div>
+
+            <div class="hint">
+              Stop sequences are checked against the decoded assistant completion. Sampling always stops at the model EOS token.
+            </div>
           </div>
         </div>
       </div>
 
       <div class="card">
-        <h3>Step speed</h3>
-        <label>Playback speed</label>
-        <div class="sliderRow">
-          <input id="stepSpeed" type="range" min="120" max="2000" step="10" />
-          <div class="smallVal" id="stepSpeedVal"></div>
+        <div class="cardHeader">
+          <h3>Step speed</h3>
+          <button class="cardToggle" data-target="speedCard" title="Collapse speed controls">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
-        <div class="hint">Controls how fast the play button advances one token at a time.</div>
+        <div class="cardBody" id="speedCard">
+          <label>Playback speed</label>
+          <div class="sliderRow">
+          <input id="stepSpeed" type="range" min="120" max="2000" step="10" title="Delay between auto-steps" />
+            <div class="smallVal" id="stepSpeedVal"></div>
+          </div>
+          <div class="hint">Controls how fast the play button advances one token at a time.</div>
+        </div>
       </div>
     </div>
 
@@ -1031,7 +1098,7 @@
           <div class="sub">Token-by-token sampling, nucleus filtering, temperature scaling, and penalties — in one view.</div>
         </div>
         <div class="statusLine">
-          <div class="pill" id="serverPill">Server</div>
+        <div class="pill" id="serverPill" title="Backend connection status">Server</div>
           <div class="muted" id="serverMsg">—</div>
         </div>
       </div>
@@ -1053,8 +1120,8 @@
           <div class="leftCol">
             <div class="branches" id="branches"></div>
             <div class="addBranchRow">
-              <button id="newBranchBtn" class="btn ghost" style="flex:1;">＋ New input</button>
-              <button id="clearBtn" class="btn danger">Clear</button>
+          <button id="newBranchBtn" class="btn ghost" style="flex:1;" title="Create a fresh input branch">＋ New input</button>
+          <button id="clearBtn" class="btn danger" title="Clear this input and its completion">Clear</button>
             </div>
           </div>
 
@@ -1062,15 +1129,15 @@
             <div class="tokenStack" id="tokenStackCard">
               <div class="stackCol" id="tokenStack"></div>
             </div>
-            <div class="llm">
-              <span>LLM</span>
+            <div class="llm" id="llmBox" title="Toggle LLM on/off">
+              <span id="llmToggle">LLM</span>
             </div>
           </div>
 
           <div class="dist">
             <div class="distTop">
               <div class="kLabel">Top‑k</div>
-              <input id="topK" type="number" min="1" max="50" step="1" />
+              <input id="topK" type="number" min="1" max="50" step="1" title="How many tokens to show in the chart" />
               <div class="spacer"></div>
               <div class="title">Next token distribution</div>
             </div>
@@ -1084,19 +1151,19 @@
             <div class="bars" id="bars"></div>
 
             <div class="forceRow">
-              <input id="forceText" type="text" placeholder="Force token / text (appends immediately)" />
-              <button id="forceBtn" class="btn primary">Force</button>
+          <input id="forceText" type="text" placeholder="Force token / text (appends immediately)" title="Appends immediately without sampling" />
+          <button id="forceBtn" class="btn primary" title="Append this text immediately (no sampling)">Force</button>
             </div>
           </div>
         </div>
       </div>
 
       <div class="controls">
-        <button id="playBtn" class="bigBtn primary">
+        <button id="playBtn" class="bigBtn primary" title="Auto-step through sampling">
           <svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7Z" fill="currentColor"/></svg>
           <span id="playBtnLabel">Play</span>
         </button>
-        <button id="stepBtn" class="bigBtn">
+        <button id="stepBtn" class="bigBtn" title="Generate one token">
           <svg viewBox="0 0 24 24" fill="none"><path d="M16 6h2v12h-2V6Zm-10 0v12l9-6-9-6Z" fill="currentColor"/></svg>
           Step
         </button>
@@ -1109,6 +1176,47 @@
   const $ = (id) => document.getElementById(id);
   const int = (x) => parseInt(x, 10);
 
+  const STORAGE_KEYS = {
+    modelId: "llmDemo.modelId",
+    params: "llmDemo.params",
+    llmEnabled: "llmDemo.llmEnabled",
+    decodingCollapsed: "llmDemo.decodingCollapsed",
+    stepSpeedCollapsed: "llmDemo.stepSpeedCollapsed",
+    topK: "llmDemo.topK",
+    stepSpeedMs: "llmDemo.stepSpeedMs",
+  };
+
+  function readStorage(key, fallback=null){
+    try{
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    }catch(e){
+      return fallback;
+    }
+  }
+
+  function writeStorage(key, value){
+    try{
+      localStorage.setItem(key, value);
+    }catch(e){}
+  }
+
+  function readBool(key, fallback=false){
+    const v = readStorage(key, null);
+    if(v === null) return fallback;
+    return v === "1";
+  }
+
+  function writeBool(key, value){
+    writeStorage(key, value ? "1" : "0");
+  }
+
+  function readJson(key, fallback=null){
+    const v = readStorage(key, null);
+    if(v === null) return fallback;
+    try{ return JSON.parse(v); }catch(e){ return fallback; }
+  }
+
   const state = {
     model: null,
     modelStatus: null,
@@ -1116,8 +1224,8 @@
     stepSpeedMs: 650,
     playing: false,
     playTimer: null,
-    preset: "balanced",
-    params: {
+    defaultPreset: "balanced",
+    defaultParams: {
       greedy: false,
       temperature: 0.7,
       top_p: 0.8,
@@ -1132,6 +1240,9 @@
     lastDist: null,
     serverOk: false,
     collapsePromptStack: false,
+    llmEnabled: false,
+    decodingCollapsedDefault: true,
+    stepSpeedCollapsed: true,
   };
 
   const promptLibrary = [
@@ -1156,6 +1267,19 @@
     creative: { greedy: false, temperature: 1.05, top_p: 0.95, repetition_penalty: 1.02, presence_penalty: 0.2, frequency_penalty: 0.1 }
   };
 
+  function cloneParams(p){
+    return {
+      greedy: !!p.greedy,
+      temperature: Number(p.temperature),
+      top_p: Number(p.top_p),
+      repetition_penalty: Number(p.repetition_penalty),
+      presence_penalty: Number(p.presence_penalty || 0),
+      frequency_penalty: Number(p.frequency_penalty || 0),
+      seed: (p.seed === null || p.seed === undefined) ? null : Number(p.seed),
+      stop_sequences: Array.isArray(p.stop_sequences) ? [...p.stop_sequences] : [],
+    };
+  }
+
   function uid(){
     return "b_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
   }
@@ -1167,15 +1291,16 @@
   }
 
   function snapshotParams(){
+    const params = getActiveParams();
     return {
-      greedy: !!state.params.greedy,
-      temperature: Number(state.params.temperature),
-      top_p: Number(state.params.top_p),
-      repetition_penalty: Number(state.params.repetition_penalty),
-      presence_penalty: Number(state.params.presence_penalty),
-      frequency_penalty: Number(state.params.frequency_penalty),
-      seed: (state.params.seed === null || state.params.seed === undefined) ? null : Number(state.params.seed),
-      stop_sequences: Array.isArray(state.params.stop_sequences) ? [...state.params.stop_sequences] : [],
+      greedy: !!params.greedy,
+      temperature: Number(params.temperature),
+      top_p: Number(params.top_p),
+      repetition_penalty: Number(params.repetition_penalty),
+      presence_penalty: Number(params.presence_penalty),
+      frequency_penalty: Number(params.frequency_penalty),
+      seed: (params.seed === null || params.seed === undefined) ? null : Number(params.seed),
+      stop_sequences: Array.isArray(params.stop_sequences) ? [...params.stop_sequences] : [],
       top_k: Number(state.topK),
     };
   }
@@ -1225,6 +1350,48 @@
     $("modelMeta").textContent = meta.join(" ");
   }
 
+  function setLlmEnabled(enabled){
+    state.llmEnabled = !!enabled;
+    writeBool(STORAGE_KEYS.llmEnabled, state.llmEnabled);
+    const llm = $("llmBox");
+    const dist = document.querySelector(".dist");
+    llm.classList.toggle("off", !state.llmEnabled);
+    if(dist) dist.classList.toggle("off", !state.llmEnabled);
+    if(!state.llmEnabled){
+      stopPlayback();
+      renderDistribution(null);
+      setServerStatus(true, "LLM is off");
+    }else{
+      updatePreviewDebounced(true);
+    }
+  }
+
+  const chevronDown = '<svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const chevronUp = '<svg viewBox="0 0 24 24" fill="none"><path d="M7 14l5-5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function setCardCollapsed(card, collapsed, toggleBtn){
+    if(!card) return;
+    card.classList.toggle("collapsed", !!collapsed);
+    if(toggleBtn){
+      toggleBtn.title = collapsed ? "Expand" : "Collapse";
+      toggleBtn.innerHTML = collapsed ? chevronUp : chevronDown;
+    }
+  }
+
+  function syncDecodingCollapse(){
+    const b = getActiveBranch();
+    const card = $("decodingCard") ? $("decodingCard").closest(".card") : null;
+    const toggleBtn = document.querySelector('.cardToggle[data-target="decodingCard"]');
+    const collapsed = b ? !!b.decodingCollapsed : state.decodingCollapsedDefault;
+    setCardCollapsed(card, collapsed, toggleBtn);
+  }
+
+  function syncSpeedCollapse(){
+    const card = $("speedCard") ? $("speedCard").closest(".card") : null;
+    const toggleBtn = document.querySelector('.cardToggle[data-target="speedCard"]');
+    setCardCollapsed(card, !!state.stepSpeedCollapsed, toggleBtn);
+  }
+
   function openPromptLibrary(){
     const overlay = $("promptLibrary");
     const grid = $("promptLibraryGrid");
@@ -1262,6 +1429,38 @@
     updatePreviewDebounced(true);
   }
 
+  function loadStoredSettings(){
+    const storedTopK = readStorage(STORAGE_KEYS.topK, null);
+    if(storedTopK !== null && storedTopK !== undefined){
+      const k = Number(storedTopK);
+      if(!Number.isNaN(k)) state.topK = Math.max(1, Math.min(50, k));
+    }
+    const storedSpeed = readStorage(STORAGE_KEYS.stepSpeedMs, null);
+    if(storedSpeed !== null && storedSpeed !== undefined){
+      const s = Number(storedSpeed);
+      if(!Number.isNaN(s)) state.stepSpeedMs = Math.max(80, s);
+    }
+
+    const saved = readJson(STORAGE_KEYS.params, null);
+    if(saved && saved.params){
+      const merged = { ...state.defaultParams, ...saved.params };
+      merged.stop_sequences = Array.isArray(saved.params.stop_sequences) ? [...saved.params.stop_sequences] : [];
+      state.defaultParams = cloneParams(merged);
+    }
+    if(saved && saved.preset){
+      state.defaultPreset = saved.preset;
+    }
+    if(state.defaultPreset === "greedy"){
+      state.defaultParams.greedy = true;
+    }else if(state.defaultParams.greedy && state.defaultPreset !== "greedy"){
+      state.defaultParams.greedy = false;
+    }
+
+    state.llmEnabled = readBool(STORAGE_KEYS.llmEnabled, false);
+    state.decodingCollapsedDefault = readBool(STORAGE_KEYS.decodingCollapsed, true);
+    state.stepSpeedCollapsed = readBool(STORAGE_KEYS.stepSpeedCollapsed, true);
+  }
+
   async function pollModelReady(){
     for(;;){
       let st;
@@ -1290,6 +1489,16 @@
 
   function getActiveBranch(){
     return state.branches.find(b => b.id === state.activeBranchId) || null;
+  }
+
+  function getActiveParams(){
+    const b = getActiveBranch();
+    return b ? b.params : state.defaultParams;
+  }
+
+  function getActivePreset(){
+    const b = getActiveBranch();
+    return b ? b.preset : state.defaultPreset;
   }
 
   function stopPlayback(){
@@ -1361,13 +1570,13 @@
   }
 
   function applyPreset(name){
-    state.preset = name;
-    const btns = $("presetButtons").querySelectorAll(".btn");
-    btns.forEach(b => b.classList.toggle("active", b.dataset.preset === name));
+    const b = getActiveBranch();
+    if(!b) return;
+    b.preset = name;
     if(name !== "custom"){
       const p = presets[name] || presets.balanced;
-      state.params = {
-        ...state.params,
+      b.params = {
+        ...b.params,
         greedy: p.greedy,
         temperature: p.temperature,
         top_p: p.top_p,
@@ -1376,56 +1585,75 @@
         frequency_penalty: p.frequency_penalty,
       };
     }
+    state.defaultParams = cloneParams(b.params);
+    state.defaultPreset = b.preset;
+    writeStorage(STORAGE_KEYS.params, JSON.stringify({ params: state.defaultParams, preset: state.defaultPreset }));
     syncControlsFromState();
     updatePreviewDebounced(true);
   }
 
   function markCustomPreset(){
     // If the user tweaks any decoding control, switch to "custom" unless greedy is enabled.
-    if(state.params.greedy) return;
-    if(state.preset === "custom") return;
-    state.preset = "custom";
-    $("presetButtons").querySelectorAll(".btn").forEach(b => b.classList.toggle("active", b.dataset.preset === "custom"));
+    const b = getActiveBranch();
+    if(!b) return;
+    if(b.params.greedy) return;
+    if(b.preset === "custom") return;
+    b.preset = "custom";
+    state.defaultPreset = b.preset;
+    $("presetButtons").querySelectorAll(".btn").forEach(btn => btn.classList.toggle("active", btn.dataset.preset === "custom"));
   }
 
   function syncControlsFromState(){
-    $("temperature").value = state.params.temperature;
-    $("topP").value = state.params.top_p;
-    $("repetitionPenalty").value = state.params.repetition_penalty;
-    $("presencePenalty").value = state.params.presence_penalty;
-    $("frequencyPenalty").value = state.params.frequency_penalty;
-    $("temperatureVal").textContent = Number(state.params.temperature).toFixed(2);
-    $("topPVal").textContent = Number(state.params.top_p).toFixed(2);
-    $("repetitionPenaltyVal").textContent = Number(state.params.repetition_penalty).toFixed(2);
+    const b = getActiveBranch();
+    const params = b ? b.params : state.defaultParams;
+    const preset = b ? b.preset : state.defaultPreset;
+
+    $("temperature").value = params.temperature;
+    $("topP").value = params.top_p;
+    $("repetitionPenalty").value = params.repetition_penalty;
+    $("presencePenalty").value = params.presence_penalty;
+    $("frequencyPenalty").value = params.frequency_penalty;
+    $("temperatureVal").textContent = Number(params.temperature).toFixed(2);
+    $("topPVal").textContent = Number(params.top_p).toFixed(2);
+    $("repetitionPenaltyVal").textContent = Number(params.repetition_penalty).toFixed(2);
 
     $("topK").value = state.topK;
     $("stepSpeed").value = state.stepSpeedMs;
     $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
 
     // Seed
-    $("seed").value = (state.params.seed === null || state.params.seed === undefined) ? "" : String(state.params.seed);
+    $("seed").value = (params.seed === null || params.seed === undefined) ? "" : String(params.seed);
 
     // Stop sequences: for UX we keep a single text input. Split by |
-    const s = (state.params.stop_sequences || []).join(" | ");
+    const s = (params.stop_sequences || []).join(" | ");
     $("stopSeq").value = s;
 
+    // Preset buttons
+    $("presetButtons").querySelectorAll(".btn").forEach(btn => btn.classList.toggle("active", btn.dataset.preset === preset));
+
     // Disable controls when greedy
-    const disabled = !!state.params.greedy;
+    const disabled = !!params.greedy;
     ["temperature","topP"].forEach(id => $(id).disabled = disabled);
   }
 
   function readParamsFromControls(){
-    state.params.temperature = Number($("temperature").value);
-    state.params.top_p = Number($("topP").value);
-    state.params.repetition_penalty = Number($("repetitionPenalty").value);
-    state.params.presence_penalty = Number($("presencePenalty").value || 0);
-    state.params.frequency_penalty = Number($("frequencyPenalty").value || 0);
+    const b = getActiveBranch();
+    if(!b) return;
+    b.params.temperature = Number($("temperature").value);
+    b.params.top_p = Number($("topP").value);
+    b.params.repetition_penalty = Number($("repetitionPenalty").value);
+    b.params.presence_penalty = Number($("presencePenalty").value || 0);
+    b.params.frequency_penalty = Number($("frequencyPenalty").value || 0);
 
     const seedStr = ($("seed").value || "").trim();
-    state.params.seed = seedStr === "" ? null : Number(seedStr);
+    b.params.seed = seedStr === "" ? null : Number(seedStr);
 
     const stopRaw = ($("stopSeq").value || "").trim();
-    state.params.stop_sequences = stopRaw === "" ? [] : stopRaw.split("|").map(s => s.trim()).filter(Boolean);
+    b.params.stop_sequences = stopRaw === "" ? [] : stopRaw.split("|").map(s => s.trim()).filter(Boolean);
+
+    state.defaultParams = cloneParams(b.params);
+    state.defaultPreset = b.preset;
+    writeStorage(STORAGE_KEYS.params, JSON.stringify({ params: state.defaultParams, preset: state.defaultPreset }));
 
     // Greedy is set only through preset button
   }
@@ -1471,7 +1699,7 @@
       if(b.id === state.activeBranchId){
         const book = document.createElement("button");
         book.className = "iconBtn";
-        book.title = "Prompt library";
+        book.title = "Example prompts · replace this input";
         book.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M5 4.5c0-.83.67-1.5 1.5-1.5h9c1.93 0 3.5 1.57 3.5 3.5v12a2 2 0 0 1-2 2H7a2 2 0 0 0-2 2V4.5Z" stroke="currentColor" stroke-width="1.6"/><path d="M5 19.5c0-1.1.9-2 2-2h11" stroke="currentColor" stroke-width="1.6"/></svg>';
         book.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -1481,7 +1709,8 @@
 
         const fork = document.createElement("button");
         fork.className = "btn forkBtn";
-        fork.textContent = "Fork";
+        fork.title = "Fork this input · duplicate and branch";
+        fork.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><line x1="6" y1="3" x2="6" y2="15" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="1.9"/><circle cx="6" cy="18" r="3" stroke="currentColor" stroke-width="1.9"/><path d="M18 9a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>';
         fork.addEventListener("click", (e) => {
           e.stopPropagation();
           forkBranch(b.id);
@@ -1961,6 +2190,8 @@
     state.activeBranchId = branchId;
     renderBranches();
     renderTokenStack();
+    syncControlsFromState();
+    syncDecodingCollapse();
     updatePreviewDebounced(true);
   }
 
@@ -1973,6 +2204,9 @@
       completionTokens: [],
       done: false,
       resetRng: true,
+      preset: state.defaultPreset,
+      params: cloneParams(state.defaultParams),
+      decodingCollapsed: state.decodingCollapsedDefault,
     };
     if(copyFrom){
       b.prompt = copyFrom.prompt;
@@ -1981,11 +2215,16 @@
       b.completionTokens = [...(copyFrom.completionTokens || [])];
       b.done = copyFrom.done || false;
       b.resetRng = true;
+      b.preset = copyFrom.preset || b.preset;
+      b.params = cloneParams(copyFrom.params || b.params);
+      b.decodingCollapsed = !!copyFrom.decodingCollapsed;
     }
     state.branches.push(b);
     state.activeBranchId = b.id;
     renderBranches();
     renderTokenStack();
+    syncControlsFromState();
+    syncDecodingCollapse();
     updatePreviewDebounced(true);
   }
 
@@ -2034,14 +2273,15 @@
     try{
       readParamsFromControls();
       // Do not let greedy be overridden by sliders; it's only via preset.
-      if(state.preset === "greedy") state.params.greedy = true;
+      if(getActivePreset() === "greedy") b.params.greedy = true;
+      const params = b.params;
 
       const res = await apiPost("/api/preview", {
         branch_id: b.id,
         prompt: b.prompt,
         completion_ids: b.completionIds,
         top_k: state.topK,
-        params: state.params
+        params
       });
 
       setServerStatus(true, res.model.model_id ? "" : "—");
@@ -2060,7 +2300,7 @@
 
       renderBranches();
       renderTokenStack();
-      renderDistribution(res.dist);
+      renderDistribution(state.llmEnabled ? res.dist : null);
 
     }catch(e){
       setServerStatus(false, String(e).slice(0,180));
@@ -2086,10 +2326,15 @@
   async function doStep(extra={}){
     const b = getActiveBranch();
     if(!b || b.done) return;
+    if(!state.llmEnabled){
+      setServerStatus(true, "LLM is off");
+      return;
+    }
 
     try{
       readParamsFromControls();
-      if(state.preset === "greedy") state.params.greedy = true;
+      if(getActivePreset() === "greedy") b.params.greedy = true;
+      const params = b.params;
       const paramsSnapshot = snapshotParams();
       const forcedBy = extra.force_text ? "text" : (extra.force_token_id !== undefined && extra.force_token_id !== null ? "token" : null);
       const forced = !!forcedBy;
@@ -2100,7 +2345,7 @@
         prompt: b.prompt,
         completion_ids: b.completionIds,
         top_k: state.topK,
-        params: state.params,
+        params,
         ...extra
       });
       b.resetRng = false;
@@ -2181,6 +2426,10 @@
   function togglePlay(){
     const b = getActiveBranch();
     if(!b) return;
+    if(!state.llmEnabled){
+      setServerStatus(true, "LLM is off");
+      return;
+    }
     if(b.done){
       setServerStatus(true, "This branch is done. Edit the prompt or fork to continue.");
       return;
@@ -2203,7 +2452,8 @@
       try{
         await apiPost("/api/model/load", { model_id: id });
         setModelStatus({loading:true,ready:false,error:null,model_id:id});
-        await pollModelReady();
+        const st = await pollModelReady();
+        if(st.model_id) writeStorage(STORAGE_KEYS.modelId, st.model_id);
         updatePreviewDebounced(true);
       }catch(e){
         setServerStatus(false, String(e).slice(0,180));
@@ -2217,12 +2467,14 @@
     $("presetButtons").querySelectorAll(".btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const p = btn.dataset.preset;
+        const b = getActiveBranch();
+        if(!b) return;
         if(p === "greedy"){
-          state.params.greedy = true;
+          b.params.greedy = true;
           applyPreset("greedy");
           return;
         }
-        state.params.greedy = false;
+        b.params.greedy = false;
         applyPreset(p);
       });
     });
@@ -2252,12 +2504,14 @@
 
     $("topK").addEventListener("input", () => {
       state.topK = Math.max(1, Math.min(50, Number($("topK").value || 10)));
+      writeStorage(STORAGE_KEYS.topK, String(state.topK));
       updatePreviewDebounced(true);
     });
 
     $("stepSpeed").addEventListener("input", () => {
       state.stepSpeedMs = Math.max(80, Number($("stepSpeed").value || 650));
       $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
+      writeStorage(STORAGE_KEYS.stepSpeedMs, String(state.stepSpeedMs));
     });
 
     $("forceBtn").addEventListener("click", forceText);
@@ -2270,6 +2524,10 @@
 
     $("playBtn").addEventListener("click", togglePlay);
     $("stepBtn").addEventListener("click", () => doStep());
+
+    $("llmBox").addEventListener("click", () => {
+      setLlmEnabled(!state.llmEnabled);
+    });
 
     window.addEventListener("resize", () => requestAnimationFrame(drawWires));
     $("tokenStack").addEventListener("scroll", () => requestAnimationFrame(drawWires));
@@ -2289,25 +2547,52 @@
     window.addEventListener("keydown", (e) => {
       if(e.key === "Escape") closePromptLibrary();
     });
+
+    document.querySelectorAll(".cardToggle").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.dataset.target;
+        const body = targetId ? $(targetId) : null;
+        if(!body) return;
+        const card = body.closest(".card");
+        if(targetId === "decodingCard"){
+          const b = getActiveBranch();
+          if(!b) return;
+          b.decodingCollapsed = !b.decodingCollapsed;
+          state.decodingCollapsedDefault = b.decodingCollapsed;
+          writeBool(STORAGE_KEYS.decodingCollapsed, state.decodingCollapsedDefault);
+          setCardCollapsed(card, b.decodingCollapsed, btn);
+          return;
+        }
+        if(targetId === "speedCard"){
+          state.stepSpeedCollapsed = !state.stepSpeedCollapsed;
+          writeBool(STORAGE_KEYS.stepSpeedCollapsed, state.stepSpeedCollapsed);
+          setCardCollapsed(card, state.stepSpeedCollapsed, btn);
+        }
+      });
+    });
   }
 
   async function init(){
-    $("modelId").value = "Qwen/Qwen2.5-0.5B-Instruct";
+    loadStoredSettings();
+    const storedModel = readStorage(STORAGE_KEYS.modelId, null);
+    $("modelId").value = storedModel || "Qwen/Qwen2.5-0.5B-Instruct";
     $("topK").value = state.topK;
     $("stepSpeed").value = state.stepSpeedMs;
     $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
-
-    syncControlsFromState();
 
     wireEvents();
 
     // Initial branch (pre-filled for the live demo)
     newBranch(null, "The capital of France is");
 
+    syncSpeedCollapse();
+    setLlmEnabled(state.llmEnabled);
+
     // Poll model status
     try{
       const st = await pollModelReady();
       $("modelId").value = st.model_id || $("modelId").value;
+      if(st.model_id) writeStorage(STORAGE_KEYS.modelId, st.model_id);
       setServerStatus(true, "Ready");
       updatePreviewDebounced(true);
     }catch(e){
