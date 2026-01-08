@@ -9,33 +9,39 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg0:#f6f7ff;
-      --bg1:#f3fbff;
-      --panel: rgba(255,255,255,.78);
+      --bg0:#f4f7f9;
+      --bg1:#eef5f7;
+      --panel: rgba(255,255,255,.9);
       --panelSolid:#ffffff;
-      --text:#141827;
-      --muted:#6b7280;
-      --border: rgba(20,24,39,.12);
-      --shadow: 0 18px 60px rgba(20,24,39,.10);
-      --shadow2: 0 10px 30px rgba(20,24,39,.08);
+      --text:#0f172a;
+      --muted:#64748b;
+      --border: rgba(15,23,42,.12);
+      --shadow: none;
+      --shadow2: none;
       --radius: 18px;
       --radius2: 14px;
-      --accent:#6d5efc;         /* pastel purple */
-      --accent2:#2dd4bf;        /* teal */
-      --accent3:#fbbf24;        /* amber */
-      --specialBg: rgba(251,191,36,.22);
-      --specialBorder: rgba(251,191,36,.45);
-      --specialText: rgba(120,74,10,1);
+      --accent-rgb: 37,99,235;       /* blue */
+      --accent2-rgb: 13,148,136;     /* teal */
+      --accent3-rgb: 245,158,11;     /* amber */
+      --accent: rgb(var(--accent-rgb));
+      --accent2: rgb(var(--accent2-rgb));
+      --accent3: rgb(var(--accent3-rgb));
+      --specialBg: rgba(var(--accent3-rgb),.22);
+      --specialBorder: rgba(var(--accent3-rgb),.45);
+      --specialText: #92400e;
       --token-stack-width: 210px;
       --llm-width: 280px;
       --gap-min: 16px;
       --danger:#ef4444;
       --ok:#22c55e;
-      --wire: rgba(109,94,252,.30);
-      --wire2: rgba(45,212,191,.26);
+      --wire: var(--accent);
+      --wire2: var(--accent2);
     }
 
-    *{ box-sizing:border-box; }
+    *, *::before, *::after{
+      box-sizing:border-box;
+      box-shadow:none !important;
+    }
     html,body{ height:100%; }
     body{
       margin:0;
@@ -43,7 +49,7 @@
       color: var(--text);
       background:
         radial-gradient(1200px 600px at 20% 10%, var(--bg1), transparent 60%),
-        radial-gradient(1000px 500px at 90% 20%, #fff3fb, transparent 55%),
+        radial-gradient(1000px 500px at 90% 20%, #eef1f6, transparent 55%),
         linear-gradient(180deg, var(--bg0), #ffffff);
       overflow:hidden;
     }
@@ -112,8 +118,8 @@
       transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease;
     }
     input[type="text"]:focus, input[type="number"]:focus, textarea:focus{
-      border-color: rgba(109,94,252,.55);
-      box-shadow: 0 10px 22px rgba(109,94,252,.14);
+      border-color: rgba(var(--accent-rgb),.55);
+      box-shadow: none;
     }
     textarea{ resize: vertical; min-height: 64px; }
 
@@ -124,17 +130,16 @@
       font-size: 14px;
       font-weight: 700;
       cursor:pointer;
-      background: rgba(109,94,252,.12);
-      color: rgba(40,36,90,1);
+      background: rgba(var(--accent-rgb),.10);
+      color: rgba(15,23,42,1);
       transition: transform .12s ease, box-shadow .18s ease, background .18s ease;
-      box-shadow: 0 10px 22px rgba(20,24,39,.08);
       user-select:none;
     }
     .btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 30px rgba(20,24,39,.10); }
     .btn:active{ transform: translateY(0px) scale(.99); }
 
     .btn.primary{
-      background: linear-gradient(135deg, rgba(109,94,252,.90), rgba(45,212,191,.60));
+      background: var(--accent);
       color: white;
     }
     .btn.ghost{
@@ -181,8 +186,8 @@
       background: rgba(255,255,255,.65);
     }
     .segmented .btn.active{
-      background: rgba(109,94,252,.14);
-      border-color: rgba(109,94,252,.35);
+      background: rgba(var(--accent-rgb),.14);
+      border-color: rgba(var(--accent-rgb),.35);
     }
 
     .sliderRow{
@@ -293,8 +298,7 @@
       filter: grayscale(.15);
     }
     .branch.active{
-      border-color: rgba(109,94,252,.35);
-      box-shadow: 0 18px 44px rgba(109,94,252,.12);
+      border-color: rgba(var(--accent-rgb),.35);
     }
     .branchHeader{
       display:flex;
@@ -319,13 +323,31 @@
       border-radius: 999px;
       font-weight: 800;
       font-size: 13px;
-      background: rgba(45,212,191,.14);
+      background: rgba(var(--accent2-rgb),.14);
       color: rgba(15,75,70,1);
-      border: 1px solid rgba(45,212,191,.22);
-      box-shadow: none;
+      border: 1px solid rgba(var(--accent2-rgb),.22);
     }
     .forkBtn:hover{
-      box-shadow: 0 10px 22px rgba(45,212,191,.14);
+      box-shadow: none;
+    }
+
+    .iconBtn{
+      padding: 7px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(20,24,39,.12);
+      background: rgba(255,255,255,.70);
+      box-shadow: none;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .iconBtn svg{ width:16px; height:16px; }
+    .iconBtn:hover{
+      transform: translateY(-1px);
+      box-shadow: none;
+      border-color: rgba(var(--accent-rgb),.25);
     }
 
     .branch textarea{
@@ -360,9 +382,20 @@
       transition: transform .15s ease, opacity .15s ease;
     }
     .tok.gen{
-      background: rgba(45,212,191,.14);
-      border-color: rgba(45,212,191,.25);
+      background: rgba(var(--accent2-rgb),.14);
+      border-color: rgba(var(--accent2-rgb),.25);
       color: rgba(13,81,76,1);
+    }
+    .tok.delete{
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
+    }
+    .tok.delete:hover{
+      background: rgba(239,68,68,.16);
+      border-color: rgba(239,68,68,.32);
+      color: rgba(110,20,20,1);
+      box-shadow: 0 12px 26px rgba(239,68,68,.14);
+      transform: translateY(-1px);
     }
     .tok.special{
       background: var(--specialBg);
@@ -435,8 +468,8 @@
     }
     .stackTok.toggle:hover{
       transform: translateY(-1px);
-      box-shadow: 0 14px 30px rgba(20,24,39,.10);
-      border-color: rgba(109,94,252,.25);
+      box-shadow: none;
+      border-color: rgba(var(--accent-rgb),.25);
     }
     .stackTok.delete{
       cursor: pointer;
@@ -455,8 +488,8 @@
       font-weight: 800;
     }
     .stackTok.gen{
-      background: rgba(45,212,191,.14);
-      border-color: rgba(45,212,191,.24);
+      background: rgba(var(--accent2-rgb),.14);
+      border-color: rgba(var(--accent2-rgb),.24);
       color: rgba(13,81,76,1);
     }
     .stackTok.special{
@@ -468,28 +501,17 @@
     .llm{
       flex: 0 0 var(--llm-width);
       width: var(--llm-width);
-      background: rgba(255,255,255,.68);
-      border: 1px solid var(--border);
+      background: rgba(var(--accent-rgb), .22);
+      border: 1px solid rgba(var(--accent-rgb), .35);
       border-radius: var(--radius);
-      box-shadow: 0 18px 48px rgba(20,24,39,.10);
       display:flex;
       align-items:center;
       justify-content:center;
       font-size: 22px;
       font-weight: 900;
-      color: rgba(20,24,39,.62);
+      color: #ffffff;
       position:relative;
       overflow:hidden;
-    }
-    .llm::before{
-      content:"";
-      position:absolute;
-      inset:-80px;
-      background:
-        radial-gradient(240px 240px at 30% 25%, rgba(109,94,252,.18), transparent 65%),
-        radial-gradient(240px 240px at 70% 65%, rgba(45,212,191,.16), transparent 60%),
-        radial-gradient(200px 200px at 30% 80%, rgba(251,191,36,.12), transparent 60%);
-      filter: blur(0px);
     }
     .llm span{
       position:relative;
@@ -550,7 +572,7 @@
       vertical-align: middle;
     }
     .dot.base{ background: rgba(20,24,39,.14); border: 1px solid rgba(20,24,39,.16); }
-    .dot.final{ background: rgba(109,94,252,.65); border: 1px solid rgba(109,94,252,.25); }
+    .dot.final{ background: rgba(var(--accent-rgb),.65); border: 1px solid rgba(var(--accent-rgb),.25); }
 
     .bars{
       flex:1;
@@ -575,12 +597,12 @@
     }
     .barRow:hover{
       transform: translateY(-1px);
-      box-shadow: 0 16px 34px rgba(20,24,39,.08);
-      border-color: rgba(109,94,252,.22);
+      box-shadow: none;
+      border-color: rgba(var(--accent-rgb),.22);
     }
     .barRow.selected{
-      border-color: rgba(109,94,252,.35);
-      box-shadow: 0 18px 44px rgba(109,94,252,.14);
+      border-color: rgba(var(--accent-rgb),.35);
+      box-shadow: none;
     }
     .barRow.cut{
       opacity: .55;
@@ -622,8 +644,8 @@
       background: rgba(20,24,39,.14);
     }
     .barFinal{
-      background: linear-gradient(90deg, rgba(109,94,252,.85), rgba(45,212,191,.65));
-      box-shadow: 0 8px 18px rgba(109,94,252,.18);
+      background: rgba(var(--accent-rgb),.85);
+      box-shadow: none;
     }
     .barProb{
       text-align:right;
@@ -639,7 +661,7 @@
       cursor: default;
     }
     .otherRow:hover{ transform:none; box-shadow: 0 10px 24px rgba(20,24,39,.06); border-color: rgba(20,24,39,.10); }
-    .otherRow .barFinal{ background: rgba(109,94,252,.35); box-shadow:none; }
+    .otherRow .barFinal{ background: rgba(var(--accent-rgb),.35); box-shadow:none; }
     .otherRow .barTok{ color: rgba(20,24,39,.55); }
 
     .forceRow{
@@ -685,9 +707,9 @@
       transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
       user-select:none;
     }
-    .bigBtn:hover{ transform: translateY(-1px); box-shadow: 0 18px 40px rgba(20,24,39,.12); border-color: rgba(109,94,252,.25); }
+    .bigBtn:hover{ transform: translateY(-1px); box-shadow: none; border-color: rgba(var(--accent-rgb),.25); }
     .bigBtn.primary{
-      background: linear-gradient(135deg, rgba(109,94,252,.92), rgba(45,212,191,.60));
+      background: var(--accent);
       border-color: rgba(255,255,255,.28);
       color:white;
     }
@@ -757,9 +779,18 @@
       border: 1px solid rgba(20,24,39,.10);
       background: rgba(255,255,255,.78);
     }
+    .ovRow.pickable{
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .ovRow.pickable:hover{
+      transform: translateY(-1px);
+      border-color: rgba(var(--accent-rgb),.35);
+      box-shadow: none;
+    }
     .ovRow.selected{
-      border-color: rgba(109,94,252,.45);
-      box-shadow: 0 10px 22px rgba(109,94,252,.12);
+      border-color: rgba(var(--accent-rgb),.45);
+      box-shadow: none;
     }
     .ovRow.cut{
       opacity: .55;
@@ -789,8 +820,8 @@
       inset:0;
       width: 0%;
       border-radius: 999px;
-      background: linear-gradient(90deg, rgba(109,94,252,.80), rgba(45,212,191,.55));
-      box-shadow: 0 6px 16px rgba(109,94,252,.16);
+      background: rgba(var(--accent-rgb),.8);
+      box-shadow: none;
     }
     .ovRow.cut .ovBar{
       background: rgba(20,24,39,.18);
@@ -802,6 +833,75 @@
       font-size: 11px;
       font-weight: 900;
       color: rgba(20,24,39,.6);
+    }
+
+    .promptLibrary{
+      position:absolute;
+      inset:0;
+      background: rgba(20,24,39,.28);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      opacity:0;
+      pointer-events:none;
+      transition: opacity .18s ease;
+      z-index:5;
+      padding: 24px;
+    }
+    .promptLibrary.open{
+      opacity:1;
+      pointer-events:auto;
+    }
+    .promptPanel{
+      width: min(860px, 92vw);
+      max-height: min(70vh, 640px);
+      background: rgba(255,255,255,.98);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 24px 70px rgba(20,24,39,.22);
+      padding: 16px;
+      display:flex;
+      flex-direction:column;
+      gap: 12px;
+    }
+    .promptPanelHeader{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .promptPanelHeader h4{
+      margin:0;
+      font-size: 14px;
+      font-weight: 900;
+      color: rgba(20,24,39,.85);
+    }
+    .promptGrid{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      overflow:auto;
+      padding-right: 4px;
+    }
+    .promptCard{
+      border: 1px solid rgba(20,24,39,.12);
+      border-radius: 14px;
+      background: rgba(255,255,255,.9);
+      padding: 12px;
+      box-shadow: 0 12px 26px rgba(20,24,39,.08);
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(20,24,39,.8);
+      cursor:pointer;
+      transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+      white-space: pre-wrap;
+    }
+    .promptCard:hover{
+      transform: translateY(-2px);
+      border-color: rgba(var(--accent-rgb),.35);
+      box-shadow: none;
+    }
+    .promptPanelClose{
+      margin-left:auto;
     }
 
     .statusLine{
@@ -939,6 +1039,15 @@
       <div class="viz" id="viz">
         <svg class="wires" id="wires"></svg>
         <div class="tokenOverlay" id="tokenOverlay"></div>
+        <div class="promptLibrary" id="promptLibrary">
+          <div class="promptPanel" role="dialog" aria-modal="true">
+            <div class="promptPanelHeader">
+              <h4>Example prompts</h4>
+              <button class="btn ghost promptPanelClose" id="promptLibraryClose">Close</button>
+            </div>
+            <div class="promptGrid" id="promptLibraryGrid"></div>
+          </div>
+        </div>
 
         <div class="vizGrid">
           <div class="leftCol">
@@ -988,7 +1097,7 @@
           <span id="playBtnLabel">Play</span>
         </button>
         <button id="stepBtn" class="bigBtn">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M7 6h2v12H7V6Zm4.5 6 9-6v12l-9-6Z" fill="currentColor"/></svg>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M16 6h2v12h-2V6Zm-10 0v12l9-6-9-6Z" fill="currentColor"/></svg>
           Step
         </button>
       </div>
@@ -998,6 +1107,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
+  const int = (x) => parseInt(x, 10);
 
   const state = {
     model: null,
@@ -1023,6 +1133,21 @@
     serverOk: false,
     collapsePromptStack: false,
   };
+
+  const promptLibrary = [
+    "The capital of France is",
+    "In SQL, to select all columns you write",
+    "Write a haiku about",
+    "I saw her duck",
+    "Continue the story: The door creaked open and",
+    "Explain entropy to a 10-year-old in two sentences.",
+    "Translate to Spanish, French, and Japanese: Good morning.",
+    "Write Python code to compute Fibonacci numbers iteratively.",
+    "Complete the sequence: 2, 3, 5, 7, 11,",
+    "Give three pros and three cons of remote work.",
+    "Summarize this in five words: Artificial intelligence is changing everything.",
+    "Write a short dialogue between a pirate and an astronaut.",
+  ];
 
   const presets = {
     greedy:   { greedy: true,  temperature: 1.0, top_p: 1.0, repetition_penalty: 1.0, presence_penalty: 0.0, frequency_penalty: 0.0 },
@@ -1100,6 +1225,43 @@
     $("modelMeta").textContent = meta.join(" ");
   }
 
+  function openPromptLibrary(){
+    const overlay = $("promptLibrary");
+    const grid = $("promptLibraryGrid");
+    grid.innerHTML = "";
+    promptLibrary.forEach(text => {
+      const card = document.createElement("div");
+      card.className = "promptCard";
+      card.textContent = text;
+      card.addEventListener("click", () => {
+        applyPromptExample(text);
+        closePromptLibrary();
+      });
+      grid.appendChild(card);
+    });
+    overlay.classList.add("open");
+  }
+
+  function closePromptLibrary(){
+    $("promptLibrary").classList.remove("open");
+  }
+
+  function applyPromptExample(text){
+    const b = getActiveBranch();
+    if(!b) return;
+    stopPlayback();
+    b.prompt = text;
+    b.completionIds = [];
+    b.promptTokens = [];
+    b.completionTokens = [];
+    b.done = false;
+    b.resetRng = true;
+    renderBranches();
+    renderTokenStack();
+    renderDistribution(null);
+    updatePreviewDebounced(true);
+  }
+
   async function pollModelReady(){
     for(;;){
       let st;
@@ -1144,6 +1306,52 @@
     stopPlayback();
     b.completionIds.pop();
     b.completionTokens = (b.completionTokens || []).slice(0, b.completionIds.length);
+    b.done = false;
+    b.resetRng = true;
+    $("tokenOverlay").classList.remove("visible");
+    renderBranches();
+    renderTokenStack();
+    updatePreviewDebounced(true);
+  }
+
+  function replaceCompletionAtIndex(index, tokenObj, sourceMeta){
+    const b = getActiveBranch();
+    if(!b || index === null || index === undefined) return;
+    const idx = Number(index);
+    if(Number.isNaN(idx) || idx < 0) return;
+    stopPlayback();
+
+    const rawId = (tokenObj && tokenObj.id !== undefined) ? tokenObj.id : tokenObj;
+    const tokenId = Number(rawId);
+    if(Number.isNaN(tokenId)) return;
+    const keptIds = (b.completionIds || []).slice(0, idx);
+    keptIds.push(int(tokenId));
+    b.completionIds = keptIds;
+
+    const keptTokens = (b.completionTokens || []).slice(0, idx);
+    const baseMeta = sourceMeta?.meta || sourceMeta || {};
+    const paramsSnapshot = baseMeta.params || snapshotParams();
+    const replacementMeta = {
+      dist: baseMeta.dist || null,
+      selected_id: int(tokenId),
+      forced: true,
+      forced_by: "overlay",
+      greedy: !!(baseMeta.greedy ?? paramsSnapshot.greedy),
+      params: paramsSnapshot,
+      top_k: baseMeta.top_k ?? paramsSnapshot.top_k ?? state.topK,
+      completion_index: idx,
+    };
+    const replacement = {
+      ...(tokenObj || {}),
+      id: int(tokenId),
+      display: tokenObj.display || String(tokenId),
+      text: tokenObj.text || tokenObj.display || String(tokenId),
+      special: !!tokenObj.special,
+      _new: true,
+      meta: replacementMeta,
+    };
+    keptTokens.push(replacement);
+    b.completionTokens = keptTokens;
     b.done = false;
     b.resetRng = true;
     $("tokenOverlay").classList.remove("visible");
@@ -1261,6 +1469,16 @@
       header.appendChild(meta);
 
       if(b.id === state.activeBranchId){
+        const book = document.createElement("button");
+        book.className = "iconBtn";
+        book.title = "Prompt library";
+        book.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M5 4.5c0-.83.67-1.5 1.5-1.5h9c1.93 0 3.5 1.57 3.5 3.5v12a2 2 0 0 1-2 2H7a2 2 0 0 0-2 2V4.5Z" stroke="currentColor" stroke-width="1.6"/><path d="M5 19.5c0-1.1.9-2 2-2h11" stroke="currentColor" stroke-width="1.6"/></svg>';
+        book.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPromptLibrary();
+        });
+        header.appendChild(book);
+
         const fork = document.createElement("button");
         fork.className = "btn forkBtn";
         fork.textContent = "Fork";
@@ -1308,11 +1526,19 @@
         tokWrap.appendChild(sep);
       }
 
-      genToks.forEach(t => {
+      genToks.forEach((t, i) => {
         const s = document.createElement("span");
-        s.className = "tok gen" + (t.special ? " special" : "");
+        const isLast = i === genToks.length - 1;
+        s.className = "tok gen" + (t.special ? " special" : "") + (isLast ? " delete" : "");
         s.textContent = t.display;
-        attachTokenOverlay(s, t);
+        attachTokenOverlay(s, t, i);
+        if(isLast){
+          s.title = "Click to remove last completion token";
+          s.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteLastCompletionToken();
+          });
+        }
         tokWrap.appendChild(s);
       });
 
@@ -1371,7 +1597,7 @@
         });
       }
       if(gen && token && token.meta){
-        attachTokenOverlay(div, token);
+        attachTokenOverlay(div, token, token.meta.completion_index);
       }
       return div;
     };
@@ -1393,6 +1619,9 @@
         const isGen = i >= promptTokens.length;
         const canToggle = hasPrompt && i === 0;
         const isLastCompletion = isGen && (i - promptTokens.length === lastCompletionIndex);
+        if(t && t.meta && t.meta.completion_index === undefined){
+          t.meta.completion_index = i - promptTokens.length;
+        }
         const div = makeTokenEl(t, {
           gen: isGen,
           deletable: isLastCompletion,
@@ -1412,6 +1641,9 @@
     // Always render completion tokens (green) beneath the summary when collapsed.
     if(state.collapsePromptStack && completionTokens.length){
       completionTokens.forEach((t, i) => {
+        if(t && t.meta && t.meta.completion_index === undefined){
+          t.meta.completion_index = i;
+        }
         const isLastCompletion = i === lastCompletionIndex;
         const div = makeTokenEl(t, {
           gen: true,
@@ -1508,13 +1740,13 @@
     }, 120);
   }
 
-  function attachTokenOverlay(el, tokenObj){
+  function attachTokenOverlay(el, tokenObj, completionIndex){
     if(!tokenObj || !tokenObj.meta || !tokenObj.meta.dist) return;
-    el.addEventListener("mouseenter", () => showTokenOverlay(el, tokenObj));
+    el.addEventListener("mouseenter", () => showTokenOverlay(el, tokenObj, completionIndex));
     el.addEventListener("mouseleave", scheduleHideOverlay);
   }
 
-  function showTokenOverlay(el, tokenObj){
+  function showTokenOverlay(el, tokenObj, completionIndex){
     const meta = tokenObj.meta;
     if(!meta || !meta.dist) return;
     if(overlayHideTimer) clearTimeout(overlayHideTimer);
@@ -1557,11 +1789,15 @@
     const dist = meta.dist;
     (dist.tokens || []).forEach(t => {
       const row = document.createElement("div");
-      row.className = "ovRow";
+      row.className = "ovRow pickable";
       if(t.kept === false) row.classList.add("cut");
       if(meta.selected_id !== null && meta.selected_id !== undefined && t.id === meta.selected_id){
         row.classList.add("selected");
       }
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        replaceCompletionAtIndex(completionIndex, t, meta);
+      });
 
       const tok = document.createElement("div");
       tok.className = "ovTok";
@@ -1585,9 +1821,9 @@
       bars.appendChild(row);
     });
 
-    if(dist.other_p_final !== null && dist.other_p_final !== undefined){
-      const row = document.createElement("div");
-      row.className = "ovRow cut";
+      if(dist.other_p_final !== null && dist.other_p_final !== undefined){
+        const row = document.createElement("div");
+        row.className = "ovRow cut";
       const tok = document.createElement("div");
       tok.className = "ovTok";
       tok.textContent = "Other";
@@ -1675,7 +1911,7 @@
 
       const d = `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
       const opacity = 0.18 + Math.min(0.22, i * 0.012);
-      paths.push(`<path d="${d}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2.2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${d}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2.2" stroke-linecap="round"/>`);
     });
 
     const llmLeft = llmRect.left - vizRect.left;
@@ -1694,8 +1930,8 @@
       const opacity = 0.16 + Math.min(0.18, i * 0.01);
       const d = `M ${xStart} ${p.y} L ${stubStart} ${p.y}`;
       const dStub = `M ${stubStart} ${p.y} L ${llmLeftStubEnd} ${p.y}`;
-      paths.push(`<path d="${d}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
-      paths.push(`<path d="${dStub}" fill="none" stroke="rgba(109,94,252,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${d}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${dStub}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
     });
 
     // Horizontal lines from the LLM box to each distribution row
@@ -1711,8 +1947,8 @@
       const opacity = 0.14 + Math.min(0.16, i * 0.008);
       const dStub = `M ${llmRightStubStart} ${y} L ${stubEnd} ${y}`;
       const d = `M ${stubEnd} ${y} L ${xEnd} ${y}`;
-      paths.push(`<path d="${dStub}" fill="none" stroke="rgba(45,212,191,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
-      paths.push(`<path d="${d}" fill="none" stroke="rgba(45,212,191,${opacity.toFixed(3)})" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${dStub}" fill="none" stroke="var(--wire2)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
+      paths.push(`<path d="${d}" fill="none" stroke="var(--wire2)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
     });
 
     svg.setAttribute("viewBox", `0 0 ${vizRect.width} ${vizRect.height}`);
@@ -1815,7 +2051,11 @@
       const prevCompletion = b.completionTokens || [];
       b.completionTokens = (res.completion_tokens || []).map((t, i) => {
         const prev = prevCompletion[i] || {};
-        return prev.meta ? { ...t, meta: prev.meta } : t;
+        if(prev.meta){
+          return { ...t, meta: prev.meta };
+        }
+        t.meta = { completion_index: i };
+        return t;
       });
 
       renderBranches();
@@ -1877,15 +2117,16 @@
         const appendedMeta = res.appended_meta || [];
         appended.forEach((t, idx) => {
           const metaFromServer = appendedMeta[idx] || null;
-          const meta = {
-            dist: metaFromServer?.dist || res.dist || null,
-            selected_id: metaFromServer?.selected_id ?? (res.selected ? res.selected.id : (forced ? t.id : null)),
-            forced: metaFromServer?.forced ?? forced,
-            forced_by: metaFromServer?.forced_by ?? forcedBy,
-            greedy: paramsSnapshot.greedy,
-            params: paramsSnapshot,
-            top_k: paramsSnapshot.top_k,
-          };
+        const meta = {
+          dist: metaFromServer?.dist || res.dist || null,
+          selected_id: metaFromServer?.selected_id ?? (res.selected ? res.selected.id : (forced ? t.id : null)),
+          forced: metaFromServer?.forced ?? forced,
+          forced_by: metaFromServer?.forced_by ?? forcedBy,
+          greedy: paramsSnapshot.greedy,
+          params: paramsSnapshot,
+          top_k: paramsSnapshot.top_k,
+          completion_index: b.completionTokens.length + idx,
+        };
           b.completionTokens.push({ ...t, _new:true, meta });
         });
       }
@@ -2040,6 +2281,14 @@
       if(overlayHideTimer) clearTimeout(overlayHideTimer);
     });
     overlay.addEventListener("mouseleave", scheduleHideOverlay);
+
+    $("promptLibraryClose").addEventListener("click", closePromptLibrary);
+    $("promptLibrary").addEventListener("click", (e) => {
+      if(e.target.id === "promptLibrary") closePromptLibrary();
+    });
+    window.addEventListener("keydown", (e) => {
+      if(e.key === "Escape") closePromptLibrary();
+    });
   }
 
   async function init(){
