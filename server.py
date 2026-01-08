@@ -261,6 +261,9 @@ RNGS: Dict[str, Dict[str, Any]] = {}
 ATTR_LOCK = threading.Lock()
 ATTR_MODEL = None
 ATTR_MODEL_ID: Optional[str] = None
+ATTR_MODEL_CPU = None
+ATTR_MODEL_CPU_ID: Optional[str] = None
+ATTR_TOKENIZER_CPU = None
 
 
 def _reset_rng(branch_id: str, seed: int) -> torch.Generator:
@@ -281,7 +284,7 @@ def _get_rng(branch_id: str, seed: Optional[int], reset: bool = False) -> Option
 
 
 def _clear_model_objects():
-    global STATE, ATTR_MODEL, ATTR_MODEL_ID
+    global STATE, ATTR_MODEL, ATTR_MODEL_ID, ATTR_MODEL_CPU, ATTR_MODEL_CPU_ID, ATTR_TOKENIZER_CPU
     if STATE.model is not None:
         try:
             del STATE.model
@@ -297,6 +300,9 @@ def _clear_model_objects():
     with ATTR_LOCK:
         ATTR_MODEL = None
         ATTR_MODEL_ID = None
+        ATTR_MODEL_CPU = None
+        ATTR_MODEL_CPU_ID = None
+        ATTR_TOKENIZER_CPU = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -453,6 +459,26 @@ def _build_input_ids(tokenizer, prompt: str, completion_ids: List[int]) -> Tuple
 def _decode_ids(tokenizer, ids: List[int]) -> str:
     return tokenizer.decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
 
+def _ids_to_tokens(tokenizer, ids: List[int]) -> List[str]:
+    out: List[str] = []
+    for tid in ids:
+        try:
+            out.append(tokenizer.convert_ids_to_tokens(int(tid)))
+        except Exception:
+            out.append(str(tid))
+    return out
+
+
+def _tokens_to_string(tokenizer, tokens: List[str]) -> str:
+    try:
+        return tokenizer.convert_tokens_to_string(tokens)
+    except Exception:
+        try:
+            ids = tokenizer.convert_tokens_to_ids(tokens)
+            return tokenizer.decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+        except Exception:
+            return "".join(tokens)
+
 
 def _sanitize_floats(vals: List[float]) -> List[float]:
     out: List[float] = []
@@ -489,6 +515,40 @@ def _get_attr_model(method: str):
         if attr_tok is not None:
             _ensure_pad_token(attr_tok, model=attr_model_ref)
     return ATTR_MODEL, tok, public
+
+
+def _get_attr_model_cpu(model_id: str):
+    global ATTR_MODEL_CPU, ATTR_MODEL_CPU_ID, ATTR_TOKENIZER_CPU
+    with ATTR_LOCK:
+        if ATTR_MODEL_CPU is None or ATTR_MODEL_CPU_ID != model_id:
+            tok = AutoTokenizer.from_pretrained(
+                model_id,
+                use_fast=True,
+                trust_remote_code=True,
+            )
+            _ensure_pad_token(tok)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.float32,
+                trust_remote_code=True,
+            )
+            model.eval()
+            try:
+                model.config.output_attentions = True
+            except Exception:
+                pass
+            if hasattr(model, "set_attn_implementation"):
+                try:
+                    model.set_attn_implementation("eager")
+                except Exception:
+                    pass
+            ATTR_MODEL_CPU = inseq_load_model(model, "saliency", tokenizer=tok, device="cpu")
+            ATTR_MODEL_CPU_ID = model_id
+            ATTR_TOKENIZER_CPU = tok
+            attr_tok = getattr(ATTR_MODEL_CPU, "tokenizer", None)
+            if attr_tok is not None:
+                _ensure_pad_token(attr_tok, model=getattr(ATTR_MODEL_CPU, "model", None))
+    return ATTR_MODEL_CPU, ATTR_TOKENIZER_CPU
 
 
 def _compute_next_token_distribution(
@@ -1027,12 +1087,13 @@ def attribution(req: AttributionRequest):
     target_ids = [int(target_token_id)]
     context_ids = completion_ids[:target_index]
 
-    # Build context text as the model sees it (prompt + prior completion tokens).
+    # Build context text from tokens to preserve tokenization alignment.
     prompt_ids, _ = _build_input_ids(tok, req.prompt, context_ids)
     context_full_ids = [int(x) for x in (prompt_ids + context_ids)]
-    context_text = _decode_ids(tok, context_full_ids)
-    full_ids = context_full_ids + target_ids
-    full_generated_text = _decode_ids(tok, full_ids)
+    context_tokens = _ids_to_tokens(tok, context_full_ids)
+    target_tokens = _ids_to_tokens(tok, target_ids)
+    context_text = _tokens_to_string(tok, context_tokens)
+    full_generated_text = _tokens_to_string(tok, context_tokens + target_tokens)
 
     gen_ids = tok(full_generated_text, add_special_tokens=True, return_tensors=None)["input_ids"]
     if isinstance(gen_ids, (list, tuple)) and len(gen_ids) > 0 and isinstance(gen_ids[0], (list, tuple)):
@@ -1042,60 +1103,107 @@ def attribution(req: AttributionRequest):
     if isinstance(gen_ids, np.ndarray):
         gen_ids = gen_ids.tolist()
     gen_ids = [int(x) for x in list(gen_ids or [])]
-    prefix_len = max(len(gen_ids) - 1, 0)
-    prev_dtype = None
-    try:
-        if method == "integrated_gradients":
-            prev_dtype = torch.get_default_dtype()
-            torch.set_default_dtype(torch.float32)
-        out = attr_model.attribute(
-            input_texts=context_text,
-            generated_texts=full_generated_text,
-            method=method,
-            attr_pos_start=prefix_len,
-            attr_pos_end=prefix_len + 1,
-            show_progress=False,
-            pretty_progress=False,
-        )
-        agg = out.aggregate()
-        seq = agg.sequence_attributions[0]
-        scores = seq.source_attributions
-        if scores is None or (hasattr(scores, "numel") and scores.numel() == 0):
-            scores = seq.target_attributions
-        if scores is None:
-            return {"ok": False, "attributions": [], "source_len": 0}
+    prefix_len = len(context_tokens)
+    if len(gen_ids) <= prefix_len:
+        prefix_len = max(len(gen_ids) - 1, 0)
+    def _run_attr(model_for_attr):
+        prev_dtype = None
+        try:
+            if method == "integrated_gradients":
+                prev_dtype = torch.get_default_dtype()
+                torch.set_default_dtype(torch.float32)
+            out = model_for_attr.attribute(
+                input_texts=context_text,
+                generated_texts=full_generated_text,
+                method=method,
+                attr_pos_start=prefix_len,
+                attr_pos_end=prefix_len + 1,
+                show_progress=False,
+                pretty_progress=False,
+            )
+            agg = out.aggregate()
+            seq = agg.sequence_attributions[0]
+            scores = seq.source_attributions
+            if scores is None or (hasattr(scores, "numel") and scores.numel() == 0):
+                scores = seq.target_attributions
+            if scores is None:
+                return None
+            if isinstance(scores, torch.Tensor):
+                while scores.dim() > 2:
+                    scores = scores.sum(dim=-1)
+                if scores.dim() == 2:
+                    scores = scores[:, 0] if scores.shape[1] > 0 else scores.reshape(-1)
+                return scores.detach().cpu().tolist()
+            return list(scores)
+        finally:
+            if prev_dtype is not None:
+                torch.set_default_dtype(prev_dtype)
 
-        if isinstance(scores, torch.Tensor):
-            while scores.dim() > 2:
-                scores = scores.sum(dim=-1)
-            if scores.dim() == 2:
-                scores = scores[:, 0] if scores.shape[1] > 0 else scores.reshape(-1)
-            vals = scores.detach().cpu().tolist()
-        else:
-            vals = list(scores)
+    used_cpu = False
+    try:
+        vals = _run_attr(attr_model)
     except Exception as e:
         msg = str(e)
-        if "attention" in msg.lower() and "not support" in msg.lower():
-            logger.warning("Attention attribution not supported: %s", msg)
-            return {"ok": False, "error": "attention_not_supported", "attributions": [], "source_len": 0}
-        if "output_attentions" in msg.lower():
-            logger.warning("Attention outputs not available: %s", msg)
-            return {"ok": False, "error": "attention_outputs_unavailable", "attributions": [], "source_len": 0}
-        logger.exception(
-            "Attribution failed",
-            extra={
-                "method": method,
-                "model_id": public.model_id,
-                "target_index": target_index,
-                "target_token_id": target_token_id,
-                "context_len": len(context_full_ids),
-                "target_len": len(target_ids),
-            },
+        attention_err = (
+            ("attention" in msg.lower() and "not support" in msg.lower())
+            or ("output_attentions" in msg.lower())
+            or ("no scores" in msg.lower())
         )
-        raise HTTPException(status_code=500, detail=f"Attribution failed: {e}")
-    finally:
-        if prev_dtype is not None:
-            torch.set_default_dtype(prev_dtype)
+        if method == "attention" and public.device != "cpu" and attention_err:
+            logger.warning("Attention not available on %s, retrying on CPU.", public.device)
+            cpu_attr_model, _cpu_tok = _get_attr_model_cpu(public.model_id)
+            try:
+                vals = _run_attr(cpu_attr_model)
+                used_cpu = True
+                if vals is None or len(vals) == 0:
+                    return {"ok": False, "error": "attention_no_scores", "attributions": [], "source_len": 0}
+            except Exception as e2:
+                logger.exception(
+                    "Attribution failed on CPU fallback",
+                    extra={
+                        "method": method,
+                        "model_id": public.model_id,
+                        "target_index": target_index,
+                        "target_token_id": target_token_id,
+                        "context_len": len(context_full_ids),
+                        "target_len": len(target_ids),
+                        "device": "cpu",
+                    },
+                )
+                raise HTTPException(status_code=500, detail=f"Attribution failed: {e2}")
+        else:
+            if method == "attention" and attention_err:
+                logger.warning("Attention attribution not supported: %s", msg)
+                return {"ok": False, "error": "attention_not_supported", "attributions": [], "source_len": 0}
+            logger.exception(
+                "Attribution failed",
+                extra={
+                    "method": method,
+                    "model_id": public.model_id,
+                    "target_index": target_index,
+                    "target_token_id": target_token_id,
+                    "context_len": len(context_full_ids),
+                    "target_len": len(target_ids),
+                },
+            )
+            raise HTTPException(status_code=500, detail=f"Attribution failed: {e}")
+
+    if method == "attention" and public.device != "cpu" and not used_cpu:
+        max_abs = 0.0
+        if vals:
+            for v in vals:
+                try:
+                    av = abs(float(v))
+                except Exception:
+                    av = 0.0
+                if av > max_abs:
+                    max_abs = av
+        if vals is None or len(vals) == 0 or max_abs == 0.0:
+            logger.warning("Attention produced empty/zero scores on %s, retrying on CPU.", public.device)
+            cpu_attr_model, _cpu_tok = _get_attr_model_cpu(public.model_id)
+            vals = _run_attr(cpu_attr_model)
+            if vals is None or len(vals) == 0:
+                return {"ok": False, "error": "attention_no_scores", "attributions": [], "source_len": 0}
 
     return {
         "ok": True,
