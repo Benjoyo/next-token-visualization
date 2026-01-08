@@ -442,6 +442,11 @@
       border-color: var(--specialBorder);
       color: var(--specialText);
     }
+    .tok.attrHeat{
+      background-color: rgba(var(--accent-rgb), var(--attr-alpha, 0));
+      border-color: rgba(var(--accent-rgb), .55);
+      color: rgba(15,23,42,.9);
+    }
     .tok.newTok{
       animation: popIn .22s ease-out;
     }
@@ -1098,6 +1103,26 @@
           <div class="hint">Controls how fast the play button advances one token at a time.</div>
         </div>
       </div>
+
+      <div class="card">
+        <div class="cardHeader">
+          <h3>Attribution</h3>
+          <button class="cardToggle" data-target="attrCard" title="Collapse attribution controls">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="cardBody" id="attrCard">
+          <label>Method</label>
+          <select id="attrMethod">
+            <option value="off">Off</option>
+            <option value="attention">Attention</option>
+            <option value="saliency">Saliency</option>
+            <option value="input_x_gradient">Input × Gradient</option>
+            <option value="integrated_gradients">Integrated Gradients</option>
+          </select>
+          <div class="hint">Hover a generated token or a candidate token to highlight input contributions.</div>
+        </div>
+      </div>
     </div>
 
     <div class="main">
@@ -1191,6 +1216,8 @@
     llmEnabled: "llmDemo.llmEnabled",
     decodingCollapsed: "llmDemo.decodingCollapsed",
     stepSpeedCollapsed: "llmDemo.stepSpeedCollapsed",
+    attrCollapsed: "llmDemo.attrCollapsed",
+    attrMethod: "llmDemo.attrMethod",
     topK: "llmDemo.topK",
     stepSpeedMs: "llmDemo.stepSpeedMs",
   };
@@ -1252,6 +1279,11 @@
     llmEnabled: false,
     decodingCollapsedDefault: true,
     stepSpeedCollapsed: true,
+    attrCollapsed: true,
+    attrMethod: "off",
+    attrReqId: 0,
+    attrActiveKey: null,
+    attrAppliedKey: null,
   };
 
   const promptLibrary = [
@@ -1368,6 +1400,7 @@
     if(dist) dist.classList.toggle("off", !state.llmEnabled);
     if(!state.llmEnabled){
       stopPlayback();
+      clearAttribution();
       renderDistribution(null);
       setServerStatus(true, "LLM is off");
     }else{
@@ -1399,6 +1432,12 @@
     const card = $("speedCard") ? $("speedCard").closest(".card") : null;
     const toggleBtn = document.querySelector('.cardToggle[data-target="speedCard"]');
     setCardCollapsed(card, !!state.stepSpeedCollapsed, toggleBtn);
+  }
+
+  function syncAttrCollapse(){
+    const card = $("attrCard") ? $("attrCard").closest(".card") : null;
+    const toggleBtn = document.querySelector('.cardToggle[data-target="attrCard"]');
+    setCardCollapsed(card, !!state.attrCollapsed, toggleBtn);
   }
 
   function openPromptLibrary(){
@@ -1468,6 +1507,14 @@
     state.llmEnabled = readBool(STORAGE_KEYS.llmEnabled, false);
     state.decodingCollapsedDefault = readBool(STORAGE_KEYS.decodingCollapsed, true);
     state.stepSpeedCollapsed = readBool(STORAGE_KEYS.stepSpeedCollapsed, true);
+    state.attrCollapsed = readBool(STORAGE_KEYS.attrCollapsed, true);
+    const storedAttr = readStorage(STORAGE_KEYS.attrMethod, null);
+    if(storedAttr){
+      const m = String(storedAttr).toLowerCase();
+      if(["off","attention","saliency","input_x_gradient","integrated_gradients"].includes(m)){
+        state.attrMethod = m;
+      }
+    }
   }
 
   async function pollModelReady(){
@@ -1629,6 +1676,7 @@
     $("topK").value = state.topK;
     $("stepSpeed").value = state.stepSpeedMs;
     $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
+    if($("attrMethod")) $("attrMethod").value = state.attrMethod;
 
     // Seed
     $("seed").value = (params.seed === null || params.seed === undefined) ? "" : String(params.seed);
@@ -1750,10 +1798,11 @@
       const promptToks = b.promptTokens || [];
       const genToks = b.completionTokens || [];
 
-      promptToks.forEach(t => {
+      promptToks.forEach((t, i) => {
         const s = document.createElement("span");
         s.className = "tok" + (t.special ? " special" : "");
         s.textContent = t.display;
+        s.dataset.tokenIndex = String(i);
         tokWrap.appendChild(s);
       });
 
@@ -1769,6 +1818,7 @@
         const isLast = i === genToks.length - 1;
         s.className = "tok gen" + (t.special ? " special" : "") + (isLast ? " delete" : "");
         s.textContent = t.display;
+        s.dataset.tokenIndex = String(promptToks.length + i);
         attachTokenOverlay(s, t, i);
         if(isLast){
           s.title = "Click to remove last completion token";
@@ -1814,7 +1864,7 @@
     const completionTokens = b.completionTokens || [];
     const hasPrompt = promptTokens.length > 0;
     const lastCompletionIndex = completionTokens.length - 1;
-    const makeTokenEl = (token, { gen=false, deletable=false, toggle=false, onToggle=null } = {}) => {
+    const makeTokenEl = (token, { gen=false, deletable=false, toggle=false, onToggle=null, completionIndex=null } = {}) => {
       const t = (token && token.display !== undefined) ? token : { display: String(token) };
       const special = !!t.special;
       const div = document.createElement("div");
@@ -1836,6 +1886,10 @@
       }
       if(gen && token && token.meta){
         attachTokenOverlay(div, token, token.meta.completion_index);
+      }
+      if(gen && token && token.id !== undefined && completionIndex !== null && completionIndex !== undefined){
+        div.addEventListener("mouseenter", () => queueAttribution(completionIndex, token.id));
+        div.addEventListener("mouseleave", scheduleClearAttribution);
       }
       return div;
     };
@@ -1864,6 +1918,7 @@
           gen: isGen,
           deletable: isLastCompletion,
           toggle: canToggle,
+          completionIndex: isGen ? (i - promptTokens.length) : null,
           onToggle: () => {
             state.collapsePromptStack = true;
             renderTokenStack();
@@ -1885,7 +1940,8 @@
         const isLastCompletion = i === lastCompletionIndex;
         const div = makeTokenEl(t, {
           gen: true,
-          deletable: isLastCompletion
+          deletable: isLastCompletion,
+          completionIndex: i
         });
         stack.appendChild(div);
       });
@@ -1957,6 +2013,12 @@
       row.appendChild(wrap);
       row.appendChild(prob);
 
+      row.addEventListener("mouseenter", () => {
+        const b = getActiveBranch();
+        const nextIdx = b ? (b.completionIds || []).length : 0;
+        queueAttribution(nextIdx, t.id);
+      });
+      row.addEventListener("mouseleave", scheduleClearAttribution);
       row.addEventListener("click", () => {
         forceToken(t.id);
       });
@@ -1981,6 +2043,105 @@
     otherFinal.style.width = (Math.max(0, Math.min(1, dist.other_p_final)) * 100).toFixed(2) + "%";
     bars.appendChild(other);
     requestAnimationFrame(drawWires);
+  }
+
+  let attrHoverTimer = null;
+  let attrClearTimer = null;
+
+  function setAttrMethod(method){
+    const m = String(method || "off").toLowerCase();
+    state.attrMethod = ["off","attention","saliency","input_x_gradient","integrated_gradients"].includes(m) ? m : "off";
+    writeStorage(STORAGE_KEYS.attrMethod, state.attrMethod);
+    clearAttribution();
+  }
+
+  function clearAttribution(){
+    if(attrHoverTimer) clearTimeout(attrHoverTimer);
+    if(attrClearTimer) clearTimeout(attrClearTimer);
+    attrHoverTimer = null;
+    attrClearTimer = null;
+    state.attrActiveKey = null;
+    state.attrAppliedKey = null;
+    state.attrReqId += 1;
+    const activeBranchEl = document.querySelector(".branch.active");
+    if(!activeBranchEl) return;
+    activeBranchEl.querySelectorAll(".tok.attrHeat").forEach(el => {
+      el.classList.remove("attrHeat");
+      el.style.removeProperty("--attr-alpha");
+    });
+  }
+
+  function scheduleClearAttribution(){
+    if(attrClearTimer) clearTimeout(attrClearTimer);
+    attrClearTimer = setTimeout(() => {
+      clearAttribution();
+    }, 120);
+  }
+
+  function applyAttributionHeat(values){
+    const activeBranchEl = document.querySelector(".branch.active");
+    if(!activeBranchEl) return;
+    const toks = activeBranchEl.querySelectorAll(".tok");
+    let maxAbs = 0;
+    (values || []).forEach(v => {
+      const a = Math.abs(Number(v) || 0);
+      if(a > maxAbs) maxAbs = a;
+    });
+    toks.forEach(el => {
+      const idx = Number(el.dataset.tokenIndex);
+      if(Number.isNaN(idx) || idx < 0 || idx >= (values || []).length || maxAbs <= 0){
+        el.classList.remove("attrHeat");
+        el.style.removeProperty("--attr-alpha");
+        return;
+      }
+      const v = Math.abs(Number(values[idx]) || 0);
+      const alpha = 0.08 + (0.65 - 0.08) * (v / maxAbs);
+      el.style.setProperty("--attr-alpha", alpha.toFixed(3));
+      el.classList.add("attrHeat");
+    });
+  }
+
+  function queueAttribution(targetIndex, tokenId){
+    if(state.attrMethod === "off" || !state.llmEnabled) return;
+    const b = getActiveBranch();
+    if(!b) return;
+    if(attrClearTimer) clearTimeout(attrClearTimer);
+    const idx = Number(targetIndex);
+    if(Number.isNaN(idx)) return;
+    const key = `${b.id}:${idx}:${tokenId}:${state.attrMethod}`;
+    if(state.attrAppliedKey === key) return;
+    state.attrActiveKey = key;
+    if(attrHoverTimer) clearTimeout(attrHoverTimer);
+    attrHoverTimer = setTimeout(() => {
+      fetchAttribution(idx, tokenId, key);
+    }, 80);
+  }
+
+  async function fetchAttribution(targetIndex, tokenId, key){
+    const b = getActiveBranch();
+    if(!b) return;
+    const reqId = ++state.attrReqId;
+    try{
+      const res = await apiPost("/api/attribution", {
+        branch_id: b.id,
+        prompt: b.prompt,
+        completion_ids: b.completionIds || [],
+        target_index: targetIndex,
+        target_token_id: tokenId,
+        method: state.attrMethod
+      });
+      if(res && res.ok === false){
+        clearAttribution();
+        return;
+      }
+      if(reqId !== state.attrReqId || state.attrActiveKey !== key) return;
+      applyAttributionHeat(res.attributions || []);
+      state.attrAppliedKey = key;
+    }catch(e){
+      if(reqId === state.attrReqId){
+        clearAttribution();
+      }
+    }
   }
 
   let overlayHideTimer = null;
@@ -2220,6 +2381,7 @@
   function selectBranch(branchId){
     if(state.activeBranchId === branchId) return;
     stopPlayback();
+    clearAttribution();
     state.activeBranchId = branchId;
     renderBranches();
     renderTokenStack();
@@ -2229,6 +2391,7 @@
   }
 
   function newBranch(copyFrom=null, initialPrompt=""){
+    clearAttribution();
     const b = {
       id: uid(),
       prompt: (initialPrompt || ""),
@@ -2302,6 +2465,7 @@
   async function updatePreview(){
     const b = getActiveBranch();
     if(!b) return;
+    clearAttribution();
 
     try{
       readParamsFromControls();
@@ -2363,6 +2527,7 @@
       setServerStatus(true, "LLM is off");
       return;
     }
+    clearAttribution();
 
     try{
       readParamsFromControls();
@@ -2547,6 +2712,10 @@
       writeStorage(STORAGE_KEYS.stepSpeedMs, String(state.stepSpeedMs));
     });
 
+    $("attrMethod").addEventListener("change", () => {
+      setAttrMethod($("attrMethod").value);
+    });
+
     $("forceBtn").addEventListener("click", forceText);
     $("forceText").addEventListener("keydown", (e) => {
       if(e.key === "Enter"){
@@ -2600,6 +2769,12 @@
           state.stepSpeedCollapsed = !state.stepSpeedCollapsed;
           writeBool(STORAGE_KEYS.stepSpeedCollapsed, state.stepSpeedCollapsed);
           setCardCollapsed(card, state.stepSpeedCollapsed, btn);
+          return;
+        }
+        if(targetId === "attrCard"){
+          state.attrCollapsed = !state.attrCollapsed;
+          writeBool(STORAGE_KEYS.attrCollapsed, state.attrCollapsed);
+          setCardCollapsed(card, state.attrCollapsed, btn);
         }
       });
     });
@@ -2619,6 +2794,7 @@
     newBranch(null, "The capital of France is");
 
     syncSpeedCollapse();
+    syncAttrCollapse();
     setLlmEnabled(state.llmEnabled);
 
     // Poll model status

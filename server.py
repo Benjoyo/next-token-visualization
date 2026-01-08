@@ -11,6 +11,7 @@
 #   "numpy",
 #   "sentencepiece",
 #   "protobuf",
+#   "inseq",
 # ]
 # ///
 """
@@ -30,6 +31,7 @@ Notes:
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import threading
 import time
@@ -37,9 +39,11 @@ import traceback
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import math
 
 import numpy as np
 import torch
+from inseq import load_model as inseq_load_model
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -48,9 +52,39 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 DEFAULT_MODEL_ID = os.environ.get("LLM_DEMO_DEFAULT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+LOG_LEVEL = os.environ.get("LLM_DEMO_LOG_LEVEL", "info").lower()
 
 HERE = Path(__file__).resolve().parent
 INDEX_HTML = HERE / "index.html"
+
+logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+logger = logging.getLogger("llm_demo")
+
+
+def _patch_captum_ig_mps():
+    try:
+        import captum.attr._utils.approximation_methods as am
+    except Exception:
+        return
+    if getattr(am, "_llm_demo_mps_patched", False):
+        return
+    if not hasattr(am, "gauss_legendre_builders"):
+        return
+    orig = am.gauss_legendre_builders
+
+    def _patched_gauss_legendre_builders():
+        step_sizes, alphas = orig()
+
+        def step_sizes_fp32(n: int):
+            return [float(x) for x in step_sizes(n)]
+
+        def alphas_fp32(n: int):
+            return [float(x) for x in alphas(n)]
+
+        return step_sizes_fp32, alphas_fp32
+
+    am.gauss_legendre_builders = _patched_gauss_legendre_builders
+    am._llm_demo_mps_patched = True
 
 
 def _select_device() -> str:
@@ -224,6 +258,10 @@ STATE = ModelState()
 RNG_LOCK = threading.Lock()
 RNGS: Dict[str, Dict[str, Any]] = {}
 
+ATTR_LOCK = threading.Lock()
+ATTR_MODEL = None
+ATTR_MODEL_ID: Optional[str] = None
+
 
 def _reset_rng(branch_id: str, seed: int) -> torch.Generator:
     gen = torch.Generator(device="cpu")
@@ -243,7 +281,7 @@ def _get_rng(branch_id: str, seed: Optional[int], reset: bool = False) -> Option
 
 
 def _clear_model_objects():
-    global STATE
+    global STATE, ATTR_MODEL, ATTR_MODEL_ID
     if STATE.model is not None:
         try:
             del STATE.model
@@ -256,9 +294,33 @@ def _clear_model_objects():
             pass
     STATE.model = None
     STATE.tokenizer = None
+    with ATTR_LOCK:
+        ATTR_MODEL = None
+        ATTR_MODEL_ID = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _ensure_pad_token(tokenizer, model=None) -> bool:
+    if tokenizer.pad_token_id is not None:
+        return True
+    if tokenizer.eos_token_id is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer.pad_token_id is not None
+    if tokenizer.unk_token_id is not None:
+        tokenizer.pad_token = tokenizer.unk_token
+        return tokenizer.pad_token_id is not None
+    try:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+        if model is not None:
+            try:
+                model.resize_token_embeddings(len(tokenizer))
+            except Exception:
+                pass
+    except Exception:
+        return False
+    return tokenizer.pad_token_id is not None
 
 
 def _load_model_worker(model_id: str):
@@ -278,10 +340,8 @@ def _load_model_worker(model_id: str):
             trust_remote_code=True,
         )
 
-        # Some tokenizers don't have pad token; it's fine for single-step decoding.
-        # But set it defensively to eos to avoid warnings.
-        if tok.pad_token_id is None and tok.eos_token_id is not None:
-            tok.pad_token = tok.eos_token
+        # Some tokenizers don't have pad token; set it defensively.
+        _ensure_pad_token(tok)
 
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
@@ -388,6 +448,47 @@ def _build_input_ids(tokenizer, prompt: str, completion_ids: List[int]) -> Tuple
 
     full_ids = prompt_ids + completion_ids
     return prompt_ids, full_ids
+
+
+def _decode_ids(tokenizer, ids: List[int]) -> str:
+    return tokenizer.decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+
+
+def _sanitize_floats(vals: List[float]) -> List[float]:
+    out: List[float] = []
+    for v in vals:
+        try:
+            fv = float(v)
+        except Exception:
+            fv = 0.0
+        if not math.isfinite(fv):
+            fv = 0.0
+        out.append(fv)
+    return out
+
+
+def _get_attr_model(method: str):
+    global ATTR_MODEL, ATTR_MODEL_ID
+    model, tok, public = _require_ready_model()
+    _ensure_pad_token(tok, model=model)
+    with ATTR_LOCK:
+        if ATTR_MODEL is None or ATTR_MODEL_ID != public.model_id:
+            try:
+                model.config.output_attentions = True
+            except Exception:
+                pass
+            try:
+                model.config.output_hidden_states = True
+            except Exception:
+                pass
+            ATTR_MODEL = inseq_load_model(model, "saliency", tokenizer=tok, device=public.device)
+            ATTR_MODEL_ID = public.model_id
+    if ATTR_MODEL is not None:
+        attr_tok = getattr(ATTR_MODEL, "tokenizer", None)
+        attr_model_ref = getattr(ATTR_MODEL, "model", None)
+        if attr_tok is not None:
+            _ensure_pad_token(attr_tok, model=attr_model_ref)
+    return ATTR_MODEL, tok, public
 
 
 def _compute_next_token_distribution(
@@ -540,6 +641,15 @@ class StepRequest(BaseModel):
     params: DecodingParams = Field(default_factory=DecodingParams)
     force_token_id: Optional[int] = None
     force_text: Optional[str] = None
+
+
+class AttributionRequest(BaseModel):
+    branch_id: str = "default"
+    prompt: str = ""
+    completion_ids: List[int] = Field(default_factory=list)
+    target_index: int = 0
+    target_token_id: Optional[int] = None
+    method: str = "off"
 
 
 app = FastAPI(title="LLM Sampling Visualization Demo")
@@ -879,7 +989,126 @@ def step(req: StepRequest):
     }
 
 
+@app.post("/api/attribution")
+def attribution(req: AttributionRequest):
+    method = (req.method or "").strip().lower()
+    if method in ("", "off"):
+        return {"ok": True, "attributions": [], "source_len": 0}
+    if method not in {"attention", "saliency", "input_x_gradient", "integrated_gradients"}:
+        raise HTTPException(status_code=400, detail="Unsupported attribution method.")
+
+    attr_model, tok, public = _get_attr_model(method)
+    if tok.pad_token_id is None:
+        raise HTTPException(status_code=500, detail="Tokenizer has no pad token; attribution requires padding.")
+    attr_tok = getattr(attr_model, "tokenizer", None)
+    if attr_tok is not None and attr_tok.pad_token_id is None:
+        raise HTTPException(status_code=500, detail="Attribution tokenizer has no pad token; attribution requires padding.")
+
+    if method == "attention":
+        attn_model = getattr(attr_model, "model", None) or getattr(attr_model, "model_ref", None)
+        if attn_model is not None and hasattr(attn_model, "set_attn_implementation"):
+            try:
+                attn_model.set_attn_implementation("eager")
+            except Exception:
+                pass
+    if method == "integrated_gradients" and public.device == "mps":
+        _patch_captum_ig_mps()
+
+    completion_ids = [int(x) for x in (req.completion_ids or [])]
+    target_index = int(req.target_index or 0)
+    if target_index < 0:
+        target_index = 0
+    target_token_id = req.target_token_id
+    if target_token_id is None:
+        if target_index >= len(completion_ids):
+            raise HTTPException(status_code=400, detail="target_index out of range.")
+        target_token_id = completion_ids[target_index]
+
+    target_ids = [int(target_token_id)]
+    context_ids = completion_ids[:target_index]
+
+    # Build context text as the model sees it (prompt + prior completion tokens).
+    prompt_ids, _ = _build_input_ids(tok, req.prompt, context_ids)
+    context_full_ids = [int(x) for x in (prompt_ids + context_ids)]
+    context_text = _decode_ids(tok, context_full_ids)
+    full_ids = context_full_ids + target_ids
+    full_generated_text = _decode_ids(tok, full_ids)
+
+    gen_ids = tok(full_generated_text, add_special_tokens=True, return_tensors=None)["input_ids"]
+    if isinstance(gen_ids, (list, tuple)) and len(gen_ids) > 0 and isinstance(gen_ids[0], (list, tuple)):
+        gen_ids = gen_ids[0]
+    if isinstance(gen_ids, torch.Tensor):
+        gen_ids = gen_ids.detach().cpu().tolist()
+    if isinstance(gen_ids, np.ndarray):
+        gen_ids = gen_ids.tolist()
+    gen_ids = [int(x) for x in list(gen_ids or [])]
+    prefix_len = max(len(gen_ids) - 1, 0)
+    prev_dtype = None
+    try:
+        if method == "integrated_gradients":
+            prev_dtype = torch.get_default_dtype()
+            torch.set_default_dtype(torch.float32)
+        out = attr_model.attribute(
+            input_texts=context_text,
+            generated_texts=full_generated_text,
+            method=method,
+            attr_pos_start=prefix_len,
+            attr_pos_end=prefix_len + 1,
+            show_progress=False,
+            pretty_progress=False,
+        )
+        agg = out.aggregate()
+        seq = agg.sequence_attributions[0]
+        scores = seq.source_attributions
+        if scores is None or (hasattr(scores, "numel") and scores.numel() == 0):
+            scores = seq.target_attributions
+        if scores is None:
+            return {"ok": False, "attributions": [], "source_len": 0}
+
+        if isinstance(scores, torch.Tensor):
+            while scores.dim() > 2:
+                scores = scores.sum(dim=-1)
+            if scores.dim() == 2:
+                scores = scores[:, 0] if scores.shape[1] > 0 else scores.reshape(-1)
+            vals = scores.detach().cpu().tolist()
+        else:
+            vals = list(scores)
+    except Exception as e:
+        msg = str(e)
+        if "attention" in msg.lower() and "not support" in msg.lower():
+            logger.warning("Attention attribution not supported: %s", msg)
+            return {"ok": False, "error": "attention_not_supported", "attributions": [], "source_len": 0}
+        if "output_attentions" in msg.lower():
+            logger.warning("Attention outputs not available: %s", msg)
+            return {"ok": False, "error": "attention_outputs_unavailable", "attributions": [], "source_len": 0}
+        logger.exception(
+            "Attribution failed",
+            extra={
+                "method": method,
+                "model_id": public.model_id,
+                "target_index": target_index,
+                "target_token_id": target_token_id,
+                "context_len": len(context_full_ids),
+                "target_len": len(target_ids),
+            },
+        )
+        raise HTTPException(status_code=500, detail=f"Attribution failed: {e}")
+    finally:
+        if prev_dtype is not None:
+            torch.set_default_dtype(prev_dtype)
+
+    return {
+        "ok": True,
+        "attributions": _sanitize_floats(vals or []),
+        "source_len": int(len(vals or [])),
+        "context_len": int(len(context_full_ids)),
+        "target_id": int(target_token_id),
+        "model_id": public.model_id,
+        "method": method,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False, log_level=LOG_LEVEL)
