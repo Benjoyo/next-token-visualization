@@ -32,6 +32,8 @@
       --token-stack-width: 210px;
       --llm-width: 210px;
       --gap-min: 16px;
+      --llm-stub: 54px;
+      --llm-gap: calc(var(--llm-stub) + 8px);
       --danger:#ef4444;
       --ok:#22c55e;
       --wire: var(--accent);
@@ -291,9 +293,9 @@
         420px
         minmax(var(--gap-min), 1fr)
         var(--token-stack-width)
-        minmax(var(--gap-min), 1fr)
+        var(--llm-gap)
         var(--llm-width)
-        minmax(var(--gap-min), 1fr)
+        var(--llm-gap)
         minmax(460px, 2fr);
       row-gap: 14px;
       column-gap: 0;
@@ -656,6 +658,13 @@
     .barRow.selected{
       border-color: rgba(var(--accent-rgb),.35);
       box-shadow: none;
+    }
+    .barRow.greedyPick{
+      border-color: rgba(var(--accent3-rgb),.55);
+      background: rgba(var(--accent3-rgb),.08);
+    }
+    .barRow.greedyPick .barFinal{
+      background: rgba(var(--accent3-rgb),.85);
     }
     .barRow.cut{
       opacity: .55;
@@ -1899,10 +1908,24 @@
     $("keptInfo").textContent = dist.kept_token_count ? ("· nucleus keeps " + dist.kept_token_count + " tokens") : "";
 
     const maxP = Math.max(...dist.tokens.map(t => t.p_final || 0), dist.other_p_final || 0, 1e-9);
+    const greedyActive = !!getActiveParams().greedy;
+    let greedyTopId = null;
+    if(greedyActive && dist.tokens.length){
+      let best = dist.tokens[0];
+      let bestP = (best.p_final ?? best.p_base ?? 0);
+      dist.tokens.forEach(t => {
+        const p = (t.p_final ?? t.p_base ?? 0);
+        if(p > bestP){
+          best = t;
+          bestP = p;
+        }
+      });
+      greedyTopId = best ? best.id : null;
+    }
 
     dist.tokens.forEach(t => {
       const row = document.createElement("div");
-      row.className = "barRow" + (highlightTokenId === t.id ? " selected" : "");
+      row.className = "barRow" + (highlightTokenId === t.id ? " selected" : "") + (greedyTopId === t.id ? " greedyPick" : "");
       row.dataset.tokenId = t.id;
       if(t.kept === false) row.classList.add("cut");
 
@@ -2100,6 +2123,20 @@
     overlay.style.top = `${top}px`;
   }
 
+  function curvePath(x1, y1, x2, y2, minDx=32, tension=0.55, bend=0){
+    const delta = Math.abs(x2 - x1);
+    if(delta < 2){
+      return `M ${x1} ${y1} L ${x2} ${y2}`;
+    }
+    const dir = x2 >= x1 ? 1 : -1;
+    const dx = Math.min(Math.max(minDx, delta * tension), delta * 0.5);
+    const c1x = x1 + dir * dx;
+    const c2x = x2 - dir * dx;
+    const c1y = y1 + bend;
+    const c2y = y2 + bend;
+    return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+  }
+
   function drawWires(){
     const svg = $("wires");
     const viz = $("viz");
@@ -2146,37 +2183,33 @@
     const llmLeft = llmRect.left - vizRect.left;
     const llmRight = llmRect.right - vizRect.left;
     const pad = 4;
-    const stubLen = 18;
+    const stubLen = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--llm-stub')) || 54;
     const llmLeftStubEnd = llmLeft - pad;
     const llmRightStubStart = llmRight + pad;
 
-    // Horizontal lines from each token into the LLM box
+    // Curves from tokens into fixed-width LLM stubs
     tokenPoints.forEach((p, i) => {
       const xStart = p.xRight + pad;
-      const maxStub = Math.max(6, Math.min(stubLen, llmLeftStubEnd - xStart));
-      const stubStart = llmLeftStubEnd - maxStub;
-      if(stubStart <= xStart) return;
+      const stubStart = llmLeftStubEnd - stubLen;
       const opacity = 0.16 + Math.min(0.18, i * 0.01);
-      const d = `M ${xStart} ${p.y} L ${stubStart} ${p.y}`;
+      if(xStart + 1 < stubStart){
+        const d = curvePath(xStart, p.y, stubStart, p.y, 28, 0.5);
+        paths.push(`<path d="${d}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
+      }
       const dStub = `M ${stubStart} ${p.y} L ${llmLeftStubEnd} ${p.y}`;
-      paths.push(`<path d="${d}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
       paths.push(`<path d="${dStub}" fill="none" stroke="var(--wire)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
     });
 
-    // Horizontal lines from the LLM box to each distribution row
+    // Fixed-width LLM stubs to distribution rows
     const barsEl = $("bars");
     const barRows = barsEl ? barsEl.querySelectorAll(".barRow") : [];
     barRows.forEach((row, i) => {
       const r = row.getBoundingClientRect();
       const y = r.top - vizRect.top + r.height * 0.5;
       const xEnd = r.left - vizRect.left - pad;
-      const maxStub = Math.max(6, Math.min(stubLen, xEnd - llmRightStubStart));
-      const stubEnd = llmRightStubStart + maxStub;
-      if(xEnd <= llmRightStubStart) return;
+      if(xEnd <= llmRightStubStart + 1) return;
       const opacity = 0.14 + Math.min(0.16, i * 0.008);
-      const dStub = `M ${llmRightStubStart} ${y} L ${stubEnd} ${y}`;
-      const d = `M ${stubEnd} ${y} L ${xEnd} ${y}`;
-      paths.push(`<path d="${dStub}" fill="none" stroke="var(--wire2)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
+      const d = `M ${llmRightStubStart} ${y} L ${xEnd} ${y}`;
       paths.push(`<path d="${d}" fill="none" stroke="var(--wire2)" stroke-opacity="${opacity.toFixed(3)}" stroke-width="2" stroke-linecap="round"/>`);
     });
 

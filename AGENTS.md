@@ -31,7 +31,7 @@ The preview/step responses include:
 ## UI conventions
 - Use CSS variables in `:root` for colors; buttons should **not** use gradients.
 - No box shadows (the base CSS wipes them, but avoid adding new ones).
-- SVG “wires” are drawn in `updateWires()` and should scale with layout changes.
+- SVG “wires” are drawn in `drawWires()` and should scale with layout changes.
 
 ## LocalStorage
 Persisted keys (keep in sync with UI state):
