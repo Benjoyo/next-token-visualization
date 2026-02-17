@@ -126,6 +126,19 @@
       gap:10px;
       align-items:center;
     }
+    .toggleRow{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(20,24,39,.75);
+    }
+    .toggleRow input[type="checkbox"]{
+      width:16px;
+      height:16px;
+      accent-color: var(--accent);
+    }
     .col{
       display:flex;
       flex-direction:column;
@@ -137,6 +150,14 @@
       font-size: 12px;
       font-weight: 600;
       color: rgba(20,24,39,.75);
+    }
+    .inputBlock{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .inputBlock + .inputBlock{
+      margin-top: 8px;
     }
 
     input[type="text"], input[type="number"], textarea, select{
@@ -398,6 +419,10 @@
       font-weight: 600;
       border-radius: 14px;
       background: rgba(255,255,255,.92);
+    }
+    .branch textarea.systemPrompt{
+      min-height: 52px;
+      font-size: 14px;
     }
 
     .tokenWrap{
@@ -1012,6 +1037,12 @@
         <div class="statusLine" style="margin-top:10px;">
           <div id="modelMeta" class="muted">—</div>
         </div>
+        <div class="row" id="chatTemplateRow" style="margin-top:8px; display:none;">
+          <label class="toggleRow" title="Enable the tokenizer chat template">
+            <input id="useChatTemplate" type="checkbox" checked />
+            Use chat template
+          </label>
+        </div>
       </div>
 
       <div class="card">
@@ -1221,6 +1252,7 @@
     topK: "llmDemo.topK",
     stepSpeedMs: "llmDemo.stepSpeedMs",
   };
+  const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 
   function readStorage(key, fallback=null){
     try{
@@ -1284,13 +1316,14 @@
     attrReqId: 0,
     attrActiveKey: null,
     attrAppliedKey: null,
+    chatTemplateEnabled: true,
   };
 
   const promptLibrary = [
     "The capital of France is",
     "In SQL, to select all columns you write",
     "Write a haiku about",
-    "I saw her duck",
+    "Sarah gave Anna her book because",
     "Continue the story: The door creaked open and",
     "Explain entropy to a 10-year-old in two sentences.",
     "Translate to Spanish, French, and Japanese: Good morning.",
@@ -1369,8 +1402,63 @@
     $("serverMsg").textContent = msg || "—";
   }
 
+  function hasChatTemplate(){
+    return !!(state.modelStatus && state.modelStatus.has_chat_template);
+  }
+
+  function isChatTemplateEnabled(){
+    return hasChatTemplate() && !!state.chatTemplateEnabled;
+  }
+
+  function ensureSystemPrompt(b){
+    if(!b) return DEFAULT_SYSTEM_PROMPT;
+    if(typeof b.systemPrompt !== "string") b.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    return b.systemPrompt;
+  }
+
+  function syncChatTemplateUi(){
+    const row = $("chatTemplateRow");
+    const cb = $("useChatTemplate");
+    const available = hasChatTemplate();
+    if(row) row.style.display = available ? "flex" : "none";
+    if(cb){
+      cb.checked = available && !!state.chatTemplateEnabled;
+      cb.disabled = !available;
+    }
+  }
+
+  function setChatTemplateEnabled(enabled){
+    const available = hasChatTemplate();
+    const next = available && !!enabled;
+    if(state.chatTemplateEnabled === next){
+      syncChatTemplateUi();
+      return;
+    }
+    state.chatTemplateEnabled = next;
+    syncChatTemplateUi();
+    renderBranches();
+    renderTokenStack();
+    updatePreviewDebounced(true);
+    if(state.modelStatus) setModelStatus(state.modelStatus);
+  }
+
   function setModelStatus(status){
+    const prevStatus = state.modelStatus || {};
+    const prevModelId = prevStatus.model_id;
+    const prevHasTemplate = !!prevStatus.has_chat_template;
+    const prevEnabled = !!state.chatTemplateEnabled;
+
     state.modelStatus = status;
+    const hasTemplate = !!status.has_chat_template;
+    if(hasTemplate){
+      if(!prevHasTemplate || status.model_id !== prevModelId || state.chatTemplateEnabled === undefined || state.chatTemplateEnabled === null){
+        state.chatTemplateEnabled = true;
+      }
+    }else{
+      state.chatTemplateEnabled = false;
+    }
+    syncChatTemplateUi();
+
     const pill = $("modelStatusPill");
     if(status.loading){
       pill.className = "pill warn";
@@ -1386,9 +1474,16 @@
     const meta = [];
     if(status.model_id) meta.push(status.model_id);
     if(status.device) meta.push("· " + status.device + " / " + status.dtype);
-    if(status.has_chat_template) meta.push("· chat template");
+    if(status.has_chat_template){
+      meta.push("· chat template " + (state.chatTemplateEnabled ? "on" : "off"));
+    }
     if(status.eos_token_id !== null && status.eos_token_id !== undefined) meta.push("· eos=" + status.eos_token_id);
     $("modelMeta").textContent = meta.join(" ");
+
+    if((prevHasTemplate !== hasTemplate) || (prevEnabled !== state.chatTemplateEnabled)){
+      renderBranches();
+      renderTokenStack();
+    }
   }
 
   function setLlmEnabled(enabled){
@@ -1725,6 +1820,7 @@
       if(branchEl && branchEl.dataset.branchId === state.activeBranchId){
         focusInfo = {
           branchId: branchEl.dataset.branchId,
+          role: activeEl.dataset.role || "prompt",
           selectionStart: activeEl.selectionStart,
           selectionEnd: activeEl.selectionEnd,
           scrollTop: activeEl.scrollTop
@@ -1777,7 +1873,43 @@
 
       div.appendChild(header);
 
+      const showSystem = isChatTemplateEnabled();
+      if(showSystem){
+        const sysBlock = document.createElement("div");
+        sysBlock.className = "inputBlock";
+        const sysLabel = document.createElement("label");
+        sysLabel.textContent = "System message";
+        const sysTa = document.createElement("textarea");
+        sysTa.className = "systemPrompt";
+        sysTa.dataset.role = "system";
+        sysTa.placeholder = "System message…";
+        sysTa.value = ensureSystemPrompt(b);
+        sysTa.addEventListener("focus", () => selectBranch(b.id));
+        sysTa.addEventListener("click", () => selectBranch(b.id));
+        sysTa.addEventListener("input", () => {
+          b.systemPrompt = sysTa.value;
+          // Editing system message resets completion.
+          b.completionIds = [];
+          b.completionTokens = [];
+          b.done = false;
+          b.resetRng = true;
+          updateBranchTokensSoon(b.id);
+        });
+        sysBlock.appendChild(sysLabel);
+        sysBlock.appendChild(sysTa);
+        div.appendChild(sysBlock);
+      }
+
+      const promptBlock = document.createElement("div");
+      promptBlock.className = "inputBlock";
+      if(showSystem){
+        const promptLabel = document.createElement("label");
+        promptLabel.textContent = "User message";
+        promptBlock.appendChild(promptLabel);
+      }
+
       const ta = document.createElement("textarea");
+      ta.dataset.role = "prompt";
       ta.placeholder = "Enter a prompt…";
       ta.value = b.prompt;
       ta.addEventListener("focus", () => selectBranch(b.id));
@@ -1791,7 +1923,8 @@
         b.resetRng = true;
         updateBranchTokensSoon(b.id);
       });
-      div.appendChild(ta);
+      promptBlock.appendChild(ta);
+      div.appendChild(promptBlock);
 
       const tokWrap = document.createElement("div");
       tokWrap.className = "tokenWrap";
@@ -1838,7 +1971,8 @@
 
     wrap.scrollTop = prevScrollTop;
     if(focusInfo){
-      const ta = wrap.querySelector(`.branch[data-branch-id="${focusInfo.branchId}"] textarea`);
+      const sel = `.branch[data-branch-id="${focusInfo.branchId}"] textarea[data-role="${focusInfo.role}"]`;
+      const ta = wrap.querySelector(sel) || wrap.querySelector(`.branch[data-branch-id="${focusInfo.branchId}"] textarea`);
       if(ta){
         ta.focus({ preventScroll: true });
         try{
@@ -2125,6 +2259,8 @@
       const res = await apiPost("/api/attribution", {
         branch_id: b.id,
         prompt: b.prompt,
+        system_prompt: ensureSystemPrompt(b),
+        use_chat_template: isChatTemplateEnabled(),
         completion_ids: b.completionIds || [],
         target_index: targetIndex,
         target_token_id: tokenId,
@@ -2395,6 +2531,7 @@
     const b = {
       id: uid(),
       prompt: (initialPrompt || ""),
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
       completionIds: [],
       promptTokens: [],
       completionTokens: [],
@@ -2406,6 +2543,7 @@
     };
     if(copyFrom){
       b.prompt = copyFrom.prompt;
+      b.systemPrompt = (typeof copyFrom.systemPrompt === "string") ? copyFrom.systemPrompt : DEFAULT_SYSTEM_PROMPT;
       b.completionIds = [...(copyFrom.completionIds || [])];
       b.promptTokens = [...(copyFrom.promptTokens || [])];
       b.completionTokens = [...(copyFrom.completionTokens || [])];
@@ -2476,6 +2614,8 @@
       const res = await apiPost("/api/preview", {
         branch_id: b.id,
         prompt: b.prompt,
+        system_prompt: ensureSystemPrompt(b),
+        use_chat_template: isChatTemplateEnabled(),
         completion_ids: b.completionIds,
         top_k: state.topK,
         params
@@ -2541,6 +2681,8 @@
         branch_id: b.id,
         reset_rng: !!b.resetRng,
         prompt: b.prompt,
+        system_prompt: ensureSystemPrompt(b),
+        use_chat_template: isChatTemplateEnabled(),
         completion_ids: b.completionIds,
         top_k: state.topK,
         params,
@@ -2657,6 +2799,12 @@
         setServerStatus(false, String(e).slice(0,180));
       }
     });
+    const chatToggle = $("useChatTemplate");
+    if(chatToggle){
+      chatToggle.addEventListener("change", () => {
+        setChatTemplateEnabled(chatToggle.checked);
+      });
+    }
 
     $("newBranchBtn").addEventListener("click", () => newBranch());
     $("clearBtn").addEventListener("click", () => clearActive());

@@ -4,7 +4,7 @@
 # dependencies = [
 #   "fastapi>=0.110",
 #   "uvicorn>=0.30",
-#   "transformers>=4.41",
+#   "transformers>=4.41,<5.0.0",
 #   "torch",
 #   "safetensors",
 #   "accelerate",
@@ -53,6 +53,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 DEFAULT_MODEL_ID = os.environ.get("LLM_DEMO_DEFAULT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 LOG_LEVEL = os.environ.get("LLM_DEMO_LOG_LEVEL", "info").lower()
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
 HERE = Path(__file__).resolve().parent
 INDEX_HTML = HERE / "index.html"
@@ -421,17 +422,30 @@ def _require_ready_model() -> Tuple[Any, Any, ModelState]:
         return STATE.model, STATE.tokenizer, public
 
 
-def _build_input_ids(tokenizer, prompt: str, completion_ids: List[int]) -> Tuple[List[int], List[int]]:
+def _build_input_ids(
+    tokenizer,
+    prompt: str,
+    completion_ids: List[int],
+    use_chat_template: Optional[bool] = None,
+    system_prompt: Optional[str] = None,
+) -> Tuple[List[int], List[int]]:
     """
     Returns (prompt_ids_used_by_model, full_input_ids_used_by_model).
-    - If the tokenizer has a chat template, the prompt is wrapped as a user message and
-      add_generation_prompt=True is used, so completion_ids correspond to assistant tokens.
+    - If a chat template is available and enabled, the prompt is wrapped as a user message
+      (and system message, if provided) with add_generation_prompt=True so completion_ids
+      correspond to assistant tokens.
     - Otherwise prompt_ids are simply tokenizer(prompt) ids.
     """
     completion_ids = [int(x) for x in (completion_ids or [])]
 
-    if bool(getattr(tokenizer, "chat_template", None)):
-        messages = [{"role": "user", "content": prompt}]
+    has_template = bool(getattr(tokenizer, "chat_template", None))
+    use_template = has_template and (use_chat_template is not False)
+    if use_template:
+        messages: List[Dict[str, str]] = []
+        sys_msg = (system_prompt or "").strip()
+        if sys_msg:
+            messages.append({"role": "system", "content": sys_msg})
+        messages.append({"role": "user", "content": prompt})
         prompt_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
         if isinstance(prompt_ids, torch.Tensor):
             prompt_ids = prompt_ids.tolist()
@@ -687,6 +701,8 @@ class DecodingParams(BaseModel):
 class PreviewRequest(BaseModel):
     branch_id: str = "default"
     prompt: str = ""
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    use_chat_template: Optional[bool] = None
     completion_ids: List[int] = Field(default_factory=list)
     top_k: int = 10
     params: DecodingParams = Field(default_factory=DecodingParams)
@@ -696,6 +712,8 @@ class StepRequest(BaseModel):
     branch_id: str = "default"
     reset_rng: bool = False
     prompt: str = ""
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    use_chat_template: Optional[bool] = None
     completion_ids: List[int] = Field(default_factory=list)
     top_k: int = 10
     params: DecodingParams = Field(default_factory=DecodingParams)
@@ -706,6 +724,8 @@ class StepRequest(BaseModel):
 class AttributionRequest(BaseModel):
     branch_id: str = "default"
     prompt: str = ""
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    use_chat_template: Optional[bool] = None
     completion_ids: List[int] = Field(default_factory=list)
     target_index: int = 0
     target_token_id: Optional[int] = None
@@ -784,7 +804,13 @@ def load_model(req: LoadModelRequest):
 def preview(req: PreviewRequest):
     model, tok, public = _require_ready_model()
 
-    prompt_ids, full_ids = _build_input_ids(tok, req.prompt, req.completion_ids)
+    prompt_ids, full_ids = _build_input_ids(
+        tok,
+        req.prompt,
+        req.completion_ids,
+        use_chat_template=req.use_chat_template,
+        system_prompt=req.system_prompt,
+    )
 
     dist = _compute_next_token_distribution(
         model=model,
@@ -838,7 +864,13 @@ def step(req: StepRequest):
         appended_meta: List[Dict[str, Any]] = []
         current_completion = [int(x) for x in (req.completion_ids or [])]
         for fid in forced_ids:
-            _prompt_ids, full_ids = _build_input_ids(tok, req.prompt, current_completion)
+            _prompt_ids, full_ids = _build_input_ids(
+                tok,
+                req.prompt,
+                current_completion,
+                use_chat_template=req.use_chat_template,
+                system_prompt=req.system_prompt,
+            )
             dist = _compute_next_token_distribution(
                 model=model,
                 tokenizer=tok,
@@ -897,7 +929,13 @@ def step(req: StepRequest):
         }
 
     # Normal step: compute distribution, then choose token (greedy / sampled / forced token id)
-    prompt_ids, full_ids = _build_input_ids(tok, req.prompt, req.completion_ids)
+    prompt_ids, full_ids = _build_input_ids(
+        tok,
+        req.prompt,
+        req.completion_ids,
+        use_chat_template=req.use_chat_template,
+        system_prompt=req.system_prompt,
+    )
 
     # Forward pass to get logits and sampling distribution. We'll reuse the same computation for dist and sampling.
     device = _select_device()
@@ -1088,7 +1126,13 @@ def attribution(req: AttributionRequest):
     context_ids = completion_ids[:target_index]
 
     # Build context text from tokens to preserve tokenization alignment.
-    prompt_ids, _ = _build_input_ids(tok, req.prompt, context_ids)
+    prompt_ids, _ = _build_input_ids(
+        tok,
+        req.prompt,
+        context_ids,
+        use_chat_template=req.use_chat_template,
+        system_prompt=req.system_prompt,
+    )
     context_full_ids = [int(x) for x in (prompt_ids + context_ids)]
     context_tokens = _ids_to_tokens(tok, context_full_ids)
     target_tokens = _ids_to_tokens(tok, target_ids)

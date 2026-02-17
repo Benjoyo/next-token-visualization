@@ -15,6 +15,8 @@
 - **Distribution rendering**:
   - The server returns top‑k *pre‑nucleus* tokens.
   - Tokens excluded by nucleus sampling are still returned with `p_final = 0` and `kept = false` so the UI can grey them out.
+- **Attribution heatmap**: hovering a generated token (stack) or a candidate token (distribution) highlights input tokens with blue alpha; attribution methods are selected from the sidebar.
+- **Attention attribution fallback**: if attention outputs aren’t available on the active device, the server retries attention attribution on CPU.
 - **LLM on/off**: toggling the LLM greys out the box and clears the distribution column.
 - **Completion editing**: clicking the last completion token deletes it; choosing an alternative token rewinds later tokens.
 
@@ -23,6 +25,7 @@
 - `POST /api/model/load` `{ model_id }`
 - `POST /api/preview` `{ prompt, completion_ids, top_k, params }`
 - `POST /api/step` `{ prompt, completion_ids, top_k, params, force_token_id?, force_text? }`
+- `POST /api/attribution` `{ prompt, completion_ids, target_index, target_token_id, method }`
 
 The preview/step responses include:
 - `prompt_tokens`, `completion_tokens`, `dist`
@@ -40,6 +43,8 @@ Persisted keys (keep in sync with UI state):
 - `llmDemo.llmEnabled` – LLM on/off
 - `llmDemo.decodingCollapsed` – decoding panel collapsed
 - `llmDemo.stepSpeedCollapsed` – speed panel collapsed
+- `llmDemo.attrCollapsed` – attribution panel collapsed
+- `llmDemo.attrMethod` – attribution method
 - `llmDemo.topK` – top‑k for distribution
 - `llmDemo.stepSpeedMs` – autoplay speed
 
