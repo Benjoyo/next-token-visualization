@@ -2,14 +2,14 @@
 
 # LLM Next-Token Visualization
 
+**What happens to next-token probabilities when you change one knob?**
+
+**🧠 Visualize token-by-token sampling with chat templates, nucleus filtering, constrained decoding, and attribution heatmaps in one local app ⚡**
+
 ![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?logo=fastapi&logoColor=white)
 ![Transformers](https://img.shields.io/badge/LLM-Hugging%20Face%20Transformers-FFB000)
 ![Run with uv](https://img.shields.io/badge/run-uv-5C56F7)
-
-**What happens to next-token probabilities when you change one knob?**
-
-**🧠 Visualize token-by-token sampling with chat templates, nucleus filtering, constrained decoding, and attribution heatmaps in one local app ⚡**
 
 [Quick Start](#-quick-start) · [How It Works](#-how-it-works) · [API](#-api)
 
