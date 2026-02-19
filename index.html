@@ -192,6 +192,15 @@
     }
     .btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 30px rgba(20,24,39,.10); }
     .btn:active{ transform: translateY(0px) scale(.99); }
+    .btn:disabled{
+      opacity: .5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn:disabled:hover{
+      transform: none;
+      box-shadow: none;
+    }
 
     .btn.primary{
       background: var(--accent);
@@ -704,6 +713,19 @@
       background: rgba(20,24,39,.18);
       box-shadow: none;
     }
+    .barRow.invalid{
+      opacity: .38;
+      filter: grayscale(.65);
+      cursor: not-allowed;
+    }
+    .barRow.invalid:hover{
+      transform: none;
+      border-color: rgba(20,24,39,.10);
+      box-shadow: none;
+    }
+    .barRow.invalid .barFinal{
+      background: rgba(20,24,39,.14);
+    }
 
     .barTok{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -887,6 +909,11 @@
     .ovRow.cut{
       opacity: .55;
       filter: grayscale(.2);
+    }
+    .ovRow.invalid{
+      opacity: .42;
+      filter: grayscale(.65);
+      cursor: not-allowed;
     }
     .ovTok{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -1120,6 +1147,35 @@
 
       <div class="card">
         <div class="cardHeader">
+          <h3>Constrained sampling</h3>
+          <button class="cardToggle" data-target="constraintCard" title="Collapse constrained sampling controls">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="cardBody" id="constraintCard">
+          <label class="toggleRow" title="Constrain next-token choices using a schema">
+            <input id="constraintEnabled" type="checkbox" />
+            Enable constrained sampling
+          </label>
+          <div class="row">
+            <div style="flex:1;">
+              <label>Output type</label>
+              <select id="constraintType">
+                <option value="multiple_choice">Multiple choice</option>
+                <option value="regex">Regex</option>
+                <option value="cfg">CFG</option>
+                <option value="json_schema">JSON schema</option>
+              </select>
+            </div>
+          </div>
+          <label id="constraintSchemaLabel">Schema</label>
+          <textarea id="constraintSchema" rows="8" spellcheck="false"></textarea>
+          <div class="hint" id="constraintHint"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardHeader">
           <h3>Step speed</h3>
           <button class="cardToggle" data-target="speedCard" title="Collapse speed controls">
             <svg viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -1249,10 +1305,42 @@
     stepSpeedCollapsed: "llmDemo.stepSpeedCollapsed",
     attrCollapsed: "llmDemo.attrCollapsed",
     attrMethod: "llmDemo.attrMethod",
+    constraintEnabled: "llmDemo.constraintEnabled",
+    constraintType: "llmDemo.constraintType",
+    constraintSchema: "llmDemo.constraintSchema",
+    constraintCollapsed: "llmDemo.constraintCollapsed",
     topK: "llmDemo.topK",
     stepSpeedMs: "llmDemo.stepSpeedMs",
   };
   const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+  const FORCE_TEXT_DEFAULT_PLACEHOLDER = "Force token / text (appends immediately)";
+  const CONSTRAINT_TYPE_ORDER = ["multiple_choice", "regex", "cfg", "json_schema"];
+  const CONSTRAINT_CONFIG = {
+    multiple_choice: {
+      label: "Multiple choice",
+      placeholder: "One choice per line, or a JSON array.",
+      hint: "Constrain output to one of these choices.",
+      defaultSchema: "Yes\nNo\nMaybe"
+    },
+    regex: {
+      label: "Regex",
+      placeholder: "Regular expression pattern.",
+      hint: "Constrain output to match this regex.",
+      defaultSchema: "(yes|no)"
+    },
+    cfg: {
+      label: "CFG",
+      placeholder: "Grammar definition (Outlines CFG format).",
+      hint: "Constrain output with a context-free grammar.",
+      defaultSchema: "start: \"yes\" | \"no\""
+    },
+    json_schema: {
+      label: "JSON schema",
+      placeholder: "JSON Schema object.",
+      hint: "Constrain output to valid JSON matching this schema.",
+      defaultSchema: "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"answer\": { \"type\": \"string\" }\n  },\n  \"required\": [\"answer\"],\n  \"additionalProperties\": false\n}"
+    }
+  };
 
   function readStorage(key, fallback=null){
     try{
@@ -1312,6 +1400,10 @@
     decodingCollapsedDefault: true,
     stepSpeedCollapsed: true,
     attrCollapsed: true,
+    constraintCollapsed: true,
+    constraintEnabled: false,
+    constraintType: "multiple_choice",
+    constraintSchema: CONSTRAINT_CONFIG.multiple_choice.defaultSchema,
     attrMethod: "off",
     attrReqId: 0,
     attrActiveKey: null,
@@ -1414,6 +1506,101 @@
     if(!b) return DEFAULT_SYSTEM_PROMPT;
     if(typeof b.systemPrompt !== "string") b.systemPrompt = DEFAULT_SYSTEM_PROMPT;
     return b.systemPrompt;
+  }
+
+  function normalizeConstraintType(type){
+    const t = String(type || "").toLowerCase();
+    return CONSTRAINT_TYPE_ORDER.includes(t) ? t : "multiple_choice";
+  }
+
+  function getConstraintConfig(type=null){
+    const key = normalizeConstraintType(type || state.constraintType);
+    return CONSTRAINT_CONFIG[key] || CONSTRAINT_CONFIG.multiple_choice;
+  }
+
+  function isConstraintActive(){
+    return !!state.constraintEnabled;
+  }
+
+  function getConstraintPayload(){
+    return {
+      enabled: !!state.constraintEnabled,
+      type: normalizeConstraintType(state.constraintType),
+      schema: String(state.constraintSchema || ""),
+    };
+  }
+
+  function syncForceTextUi(){
+    const input = $("forceText");
+    const btn = $("forceBtn");
+    if(!input || !btn) return;
+    const disabled = isConstraintActive();
+    input.disabled = disabled;
+    btn.disabled = disabled;
+    if(disabled){
+      input.placeholder = "Force text disabled while constrained sampling is on";
+      input.title = "Disabled while constrained sampling is enabled.";
+      btn.title = "Disabled while constrained sampling is enabled.";
+    }else{
+      input.placeholder = FORCE_TEXT_DEFAULT_PLACEHOLDER;
+      input.title = "Appends immediately without sampling";
+      btn.title = "Append this text immediately (no sampling)";
+    }
+  }
+
+  function syncConstraintUi(){
+    state.constraintType = normalizeConstraintType(state.constraintType);
+    const cfg = getConstraintConfig();
+    const enabledEl = $("constraintEnabled");
+    const typeEl = $("constraintType");
+    const schemaEl = $("constraintSchema");
+    const hintEl = $("constraintHint");
+    const labelEl = $("constraintSchemaLabel");
+    if(enabledEl) enabledEl.checked = !!state.constraintEnabled;
+    if(typeEl) typeEl.value = state.constraintType;
+    if(schemaEl){
+      schemaEl.value = String(state.constraintSchema || "");
+      schemaEl.placeholder = cfg.placeholder;
+    }
+    if(hintEl) hintEl.textContent = cfg.hint;
+    if(labelEl) labelEl.textContent = `${cfg.label} schema`;
+    syncForceTextUi();
+  }
+
+  function setConstraintEnabled(enabled){
+    const next = !!enabled;
+    if(state.constraintEnabled === next){
+      syncConstraintUi();
+      return;
+    }
+    state.constraintEnabled = next;
+    writeBool(STORAGE_KEYS.constraintEnabled, state.constraintEnabled);
+    syncConstraintUi();
+    updatePreviewDebounced(true);
+  }
+
+  function setConstraintType(type){
+    const nextType = normalizeConstraintType(type);
+    const prevType = normalizeConstraintType(state.constraintType);
+    if(prevType === nextType){
+      syncConstraintUi();
+      return;
+    }
+    state.constraintType = nextType;
+    writeStorage(STORAGE_KEYS.constraintType, state.constraintType);
+    const prevDefault = getConstraintConfig(prevType).defaultSchema;
+    if(!state.constraintSchema || !state.constraintSchema.trim() || state.constraintSchema === prevDefault){
+      state.constraintSchema = getConstraintConfig(nextType).defaultSchema;
+      writeStorage(STORAGE_KEYS.constraintSchema, state.constraintSchema);
+    }
+    syncConstraintUi();
+    updatePreviewDebounced(true);
+  }
+
+  function setConstraintSchema(schema){
+    state.constraintSchema = String(schema ?? "");
+    writeStorage(STORAGE_KEYS.constraintSchema, state.constraintSchema);
+    updatePreviewDebounced(false);
   }
 
   function syncChatTemplateUi(){
@@ -1529,6 +1716,12 @@
     setCardCollapsed(card, !!state.stepSpeedCollapsed, toggleBtn);
   }
 
+  function syncConstraintCollapse(){
+    const card = $("constraintCard") ? $("constraintCard").closest(".card") : null;
+    const toggleBtn = document.querySelector('.cardToggle[data-target="constraintCard"]');
+    setCardCollapsed(card, !!state.constraintCollapsed, toggleBtn);
+  }
+
   function syncAttrCollapse(){
     const card = $("attrCard") ? $("attrCard").closest(".card") : null;
     const toggleBtn = document.querySelector('.cardToggle[data-target="attrCard"]');
@@ -1603,6 +1796,22 @@
     state.decodingCollapsedDefault = readBool(STORAGE_KEYS.decodingCollapsed, true);
     state.stepSpeedCollapsed = readBool(STORAGE_KEYS.stepSpeedCollapsed, true);
     state.attrCollapsed = readBool(STORAGE_KEYS.attrCollapsed, true);
+    state.constraintCollapsed = readBool(STORAGE_KEYS.constraintCollapsed, true);
+    state.constraintEnabled = readBool(STORAGE_KEYS.constraintEnabled, false);
+    const storedConstraintType = readStorage(STORAGE_KEYS.constraintType, null);
+    if(storedConstraintType){
+      state.constraintType = normalizeConstraintType(storedConstraintType);
+    }else{
+      state.constraintType = "multiple_choice";
+    }
+    const storedConstraintSchema = readStorage(STORAGE_KEYS.constraintSchema, null);
+    if(storedConstraintSchema !== null && storedConstraintSchema !== undefined){
+      state.constraintSchema = String(storedConstraintSchema);
+    }
+    if(!state.constraintSchema || !state.constraintSchema.trim()){
+      state.constraintSchema = getConstraintConfig(state.constraintType).defaultSchema;
+    }
+
     const storedAttr = readStorage(STORAGE_KEYS.attrMethod, null);
     if(storedAttr){
       const m = String(storedAttr).toLowerCase();
@@ -1677,6 +1886,10 @@
   function replaceCompletionAtIndex(index, tokenObj, sourceMeta){
     const b = getActiveBranch();
     if(!b || index === null || index === undefined) return;
+    if(tokenObj && tokenObj.valid === false){
+      setServerStatus(true, "Token is invalid for the active constraint.");
+      return;
+    }
     const idx = Number(index);
     if(Number.isNaN(idx) || idx < 0) return;
     stopPlayback();
@@ -1772,6 +1985,7 @@
     $("stepSpeed").value = state.stepSpeedMs;
     $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
     if($("attrMethod")) $("attrMethod").value = state.attrMethod;
+    syncConstraintUi();
 
     // Seed
     $("seed").value = (params.seed === null || params.seed === undefined) ? "" : String(params.seed);
@@ -2114,10 +2328,12 @@
     }
 
     dist.tokens.forEach(t => {
+      const isInvalid = (t.valid === false);
       const row = document.createElement("div");
       row.className = "barRow" + (highlightTokenId === t.id ? " selected" : "") + (greedyTopId === t.id ? " greedyPick" : "");
       row.dataset.tokenId = t.id;
       if(t.kept === false) row.classList.add("cut");
+      if(isInvalid) row.classList.add("invalid");
 
       const tok = document.createElement("div");
       tok.className = "barTok";
@@ -2147,15 +2363,19 @@
       row.appendChild(wrap);
       row.appendChild(prob);
 
-      row.addEventListener("mouseenter", () => {
-        const b = getActiveBranch();
-        const nextIdx = b ? (b.completionIds || []).length : 0;
-        queueAttribution(nextIdx, t.id);
-      });
-      row.addEventListener("mouseleave", scheduleClearAttribution);
-      row.addEventListener("click", () => {
-        forceToken(t.id);
-      });
+      if(isInvalid){
+        row.title = "Invalid under active constraint";
+      }else{
+        row.addEventListener("mouseenter", () => {
+          const b = getActiveBranch();
+          const nextIdx = b ? (b.completionIds || []).length : 0;
+          queueAttribution(nextIdx, t.id);
+        });
+        row.addEventListener("mouseleave", scheduleClearAttribution);
+        row.addEventListener("click", () => {
+          forceToken(t.id);
+        });
+      }
 
       bars.appendChild(row);
     });
@@ -2337,16 +2557,23 @@
     bars.className = "ovBars";
     const dist = meta.dist;
     (dist.tokens || []).forEach(t => {
+      const isInvalid = (t.valid === false);
       const row = document.createElement("div");
-      row.className = "ovRow pickable";
+      row.className = "ovRow";
+      if(!isInvalid) row.classList.add("pickable");
       if(t.kept === false) row.classList.add("cut");
+      if(isInvalid) row.classList.add("invalid");
       if(meta.selected_id !== null && meta.selected_id !== undefined && t.id === meta.selected_id){
         row.classList.add("selected");
       }
-      row.addEventListener("click", (e) => {
-        e.stopPropagation();
-        replaceCompletionAtIndex(completionIndex, t, meta);
-      });
+      if(isInvalid){
+        row.title = "Invalid under active constraint";
+      }else{
+        row.addEventListener("click", (e) => {
+          e.stopPropagation();
+          replaceCompletionAtIndex(completionIndex, t, meta);
+        });
+      }
 
       const tok = document.createElement("div");
       tok.className = "ovTok";
@@ -2618,7 +2845,8 @@
         use_chat_template: isChatTemplateEnabled(),
         completion_ids: b.completionIds,
         top_k: state.topK,
-        params
+        params,
+        constraint: getConstraintPayload()
       });
 
       setServerStatus(true, res.model.model_id ? "" : "—");
@@ -2648,10 +2876,21 @@
   async function forceToken(tokenId){
     const b = getActiveBranch();
     if(!b || b.done) return;
+    const distToken = (state.lastDist && Array.isArray(state.lastDist.tokens))
+      ? state.lastDist.tokens.find(t => Number(t.id) === Number(tokenId))
+      : null;
+    if(distToken && distToken.valid === false){
+      setServerStatus(true, "Token is invalid for the active constraint.");
+      return;
+    }
     await doStep({ force_token_id: tokenId });
   }
 
   async function forceText(){
+    if(isConstraintActive()){
+      setServerStatus(true, "Force text is disabled while constrained sampling is active.");
+      return;
+    }
     const txt = ($("forceText").value || "");
     if(txt.trim() === "") return;
     const b = getActiveBranch();
@@ -2665,6 +2904,10 @@
     if(!b || b.done) return;
     if(!state.llmEnabled){
       setServerStatus(true, "LLM is off");
+      return;
+    }
+    if(extra.force_text && isConstraintActive()){
+      setServerStatus(true, "Force text is disabled while constrained sampling is active.");
       return;
     }
     clearAttribution();
@@ -2686,6 +2929,7 @@
         completion_ids: b.completionIds,
         top_k: state.topK,
         params,
+        constraint: getConstraintPayload(),
         ...extra
       });
       b.resetRng = false;
@@ -2863,6 +3107,15 @@
     $("attrMethod").addEventListener("change", () => {
       setAttrMethod($("attrMethod").value);
     });
+    $("constraintEnabled").addEventListener("change", () => {
+      setConstraintEnabled($("constraintEnabled").checked);
+    });
+    $("constraintType").addEventListener("change", () => {
+      setConstraintType($("constraintType").value);
+    });
+    $("constraintSchema").addEventListener("input", () => {
+      setConstraintSchema($("constraintSchema").value);
+    });
 
     $("forceBtn").addEventListener("click", forceText);
     $("forceText").addEventListener("keydown", (e) => {
@@ -2919,6 +3172,12 @@
           setCardCollapsed(card, state.stepSpeedCollapsed, btn);
           return;
         }
+        if(targetId === "constraintCard"){
+          state.constraintCollapsed = !state.constraintCollapsed;
+          writeBool(STORAGE_KEYS.constraintCollapsed, state.constraintCollapsed);
+          setCardCollapsed(card, state.constraintCollapsed, btn);
+          return;
+        }
         if(targetId === "attrCard"){
           state.attrCollapsed = !state.attrCollapsed;
           writeBool(STORAGE_KEYS.attrCollapsed, state.attrCollapsed);
@@ -2937,11 +3196,13 @@
     $("stepSpeedVal").textContent = state.stepSpeedMs + " ms";
 
     wireEvents();
+    syncConstraintUi();
 
     // Initial branch (pre-filled for the live demo)
     newBranch(null, "The capital of France is");
 
     syncSpeedCollapse();
+    syncConstraintCollapse();
     syncAttrCollapse();
     setLlmEnabled(state.llmEnabled);
 

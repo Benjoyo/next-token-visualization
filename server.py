@@ -12,6 +12,8 @@
 #   "sentencepiece",
 #   "protobuf",
 #   "inseq",
+#   "outlines>=1.0.0",
+#   "llguidance",
 # ]
 # ///
 """
@@ -31,6 +33,7 @@ Notes:
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import os
 import threading
@@ -44,10 +47,13 @@ import math
 import numpy as np
 import torch
 from inseq import load_model as inseq_load_model
+from outlines import from_transformers as outlines_from_transformers
+from outlines.generator import Generator as outlines_generator
+import outlines.types as outlines_types
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -265,6 +271,15 @@ ATTR_MODEL_ID: Optional[str] = None
 ATTR_MODEL_CPU = None
 ATTR_MODEL_CPU_ID: Optional[str] = None
 ATTR_TOKENIZER_CPU = None
+
+CONSTRAINT_TYPES = {"multiple_choice", "regex", "cfg", "json_schema"}
+
+
+@dataclass
+class ConstraintSpec:
+    kind: str
+    schema: str
+    output_type: Any
 
 
 def _reset_rng(branch_id: str, seed: int) -> torch.Generator:
@@ -565,16 +580,140 @@ def _get_attr_model_cpu(model_id: str):
     return ATTR_MODEL_CPU, ATTR_TOKENIZER_CPU
 
 
-def _compute_next_token_distribution(
+def _parse_multiple_choice_items(schema_text: str) -> List[str]:
+    text = str(schema_text or "")
+    stripped = text.strip()
+    parsed_items: List[str] = []
+
+    # Accept either newline-separated options or a JSON list for convenience.
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, list):
+                parsed_items = [str(x).strip() for x in parsed if str(x).strip()]
+        except Exception:
+            parsed_items = []
+
+    if not parsed_items:
+        parsed_items = [line.strip() for line in text.splitlines() if line.strip()]
+
+    deduped: List[str] = []
+    seen = set()
+    for item in parsed_items:
+        if item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
+
+
+def _resolve_constraint_spec(constraint: Optional["ConstraintConfig"]) -> Optional[ConstraintSpec]:
+    if constraint is None or not bool(constraint.enabled):
+        return None
+
+    kind = str(constraint.type or "").strip().lower()
+    if kind not in CONSTRAINT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported constrained sampling type.")
+
+    schema_text = str(constraint.schema_text or "")
+
+    try:
+        if kind == "multiple_choice":
+            items = _parse_multiple_choice_items(schema_text)
+            if not items:
+                raise ValueError("Provide at least one choice (one per line or JSON list).")
+            output_type = outlines_types.Choice(items)
+            normalized_schema = "\n".join(items)
+        elif kind == "regex":
+            pattern = schema_text.strip()
+            if not pattern:
+                raise ValueError("Regex pattern is required.")
+            output_type = outlines_types.Regex(pattern)
+            normalized_schema = pattern
+        elif kind == "cfg":
+            grammar = schema_text.strip()
+            if not grammar:
+                raise ValueError("CFG grammar is required.")
+            output_type = outlines_types.CFG(grammar)
+            normalized_schema = grammar
+        else:
+            json_text = schema_text.strip()
+            if not json_text:
+                raise ValueError("JSON schema is required.")
+            json_schema_obj = json.loads(json_text)
+            output_type = outlines_types.JsonSchema(json_schema_obj)
+            normalized_schema = json.dumps(json_schema_obj, ensure_ascii=False)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid constrained sampling schema: {e}")
+
+    return ConstraintSpec(kind=kind, schema=normalized_schema, output_type=output_type)
+
+
+def _build_constraint_logits_processor(model, tokenizer, spec: ConstraintSpec):
+    try:
+        outlines_model = outlines_from_transformers(model, tokenizer)
+        generator = outlines_generator(outlines_model, spec.output_type)
+        processor = getattr(generator, "logits_processor", None)
+        if processor is None:
+            raise RuntimeError("Outlines did not return a logits processor.")
+        if hasattr(processor, "reset"):
+            processor.reset()
+        return processor
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to initialize constrained sampling ({spec.kind}): {e}",
+        )
+
+
+def _apply_constraint_logits_for_context(
+    logits: torch.Tensor,
+    processor: Any,
+    prompt_ids: List[int],
+    completion_ids: List[int],
+) -> torch.Tensor:
+    # Outlines processors are stateful; we replay prior completion tokens
+    # so the mask reflects the next token at the current position.
+    full_ids = [int(x) for x in (prompt_ids + completion_ids)]
+    prompt_ids = [int(x) for x in (prompt_ids or [])]
+    completion_ids = [int(x) for x in (completion_ids or [])]
+
+    logits_batch = logits.unsqueeze(0)
+    device = logits.device
+
+    if len(completion_ids) == 0:
+        first_input = torch.tensor([prompt_ids], device=device, dtype=torch.long)
+        return processor(first_input, logits_batch)[0]
+
+    # First generation step: initialize processor state without consuming tokens.
+    init_input = torch.tensor([prompt_ids], device=device, dtype=torch.long)
+    _ = processor(init_input, logits_batch.clone())
+
+    # Replay previously generated completion tokens except the latest one.
+    for i in range(1, len(completion_ids)):
+        prefix_input = torch.tensor([prompt_ids + completion_ids[:i]], device=device, dtype=torch.long)
+        _ = processor(prefix_input, logits_batch.clone())
+
+    # Final call advances the latest completion token and returns next-token mask.
+    full_input = torch.tensor([full_ids], device=device, dtype=torch.long)
+    return processor(full_input, logits_batch)[0]
+
+
+def _compute_sampling_state(
     model,
     tokenizer,
-    full_input_ids: List[int],
+    prompt_ids: List[int],
+    completion_ids: List[int],
     top_k: int,
     temperature: float,
     top_p: float,
     repetition_penalty: float,
     presence_penalty: float,
     frequency_penalty: float,
+    constraint: Optional[ConstraintSpec] = None,
 ) -> Dict[str, Any]:
     device = _select_device()
     # Trust current model device rather than re-selecting
@@ -583,8 +722,11 @@ def _compute_next_token_distribution(
     except Exception:
         model_device = torch.device(device)
 
+    prompt_ids = [int(x) for x in (prompt_ids or [])]
+    completion_ids = [int(x) for x in (completion_ids or [])]
+    full_input_ids = prompt_ids + completion_ids
+
     top_k = int(max(1, min(int(top_k), 50)))
-    temperature = float(temperature)
     top_p = float(top_p)
 
     input_tensor = torch.tensor([full_input_ids], device=model_device, dtype=torch.long)
@@ -594,97 +736,158 @@ def _compute_next_token_distribution(
         logits = outputs.logits[0, -1]
 
     logits_base = logits.float()
-
-    # Baseline probabilities (raw model)
     probs_base = torch.softmax(logits_base, dim=-1)
 
-    # Apply decoding params to obtain sampling distribution
     logits_mod = logits_base.clone()
     logits_mod = _apply_repetition_penalty(logits_mod, full_input_ids, repetition_penalty)
-    logits_mod = _apply_presence_frequency_penalties(logits_mod, full_input_ids, presence_penalty, frequency_penalty)
+    logits_mod = _apply_presence_frequency_penalties(
+        logits_mod, full_input_ids, presence_penalty, frequency_penalty
+    )
 
-    # Temperature
     temp = float(temperature)
     if temp <= 0:
         temp = 1e-6
     logits_temp = logits_mod / temp
-    probs_temp = torch.softmax(logits_temp, dim=-1)
+    probs_temp_unconstrained = torch.softmax(logits_temp, dim=-1)
 
-    # Sort by temp-scaled probs for display and nucleus filtering
-    sorted_probs, sorted_ids = torch.sort(probs_temp, descending=True)
+    # Display top-k from full pre-nucleus, pre-constraint distribution.
+    sorted_probs_display, sorted_ids_display = torch.sort(probs_temp_unconstrained, descending=True)
 
-    # Determine nucleus cutoff count (keep at least 1)
-    if float(top_p) >= 1.0:
-        kept_count = int(sorted_probs.numel())
+    logits_for_sampling = logits_temp
+    valid_mask: Optional[torch.Tensor] = None
+    if constraint is not None:
+        processor = _build_constraint_logits_processor(model, tokenizer, constraint)
+        try:
+            logits_for_sampling = _apply_constraint_logits_for_context(
+                logits=logits_temp,
+                processor=processor,
+                prompt_ids=prompt_ids,
+                completion_ids=completion_ids,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to apply constrained sampling ({constraint.kind}): {e}",
+            )
+        valid_mask = torch.isfinite(logits_for_sampling)
+        if int(valid_mask.sum().item()) <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Constraint has no valid next token at this position.",
+            )
+
+    probs_sampling = torch.softmax(logits_for_sampling, dim=-1)
+    if not torch.isfinite(probs_sampling).all():
+        raise HTTPException(
+            status_code=400,
+            detail="Sampling distribution became invalid for the current settings.",
+        )
+    sorted_probs_sampling, sorted_ids_sampling = torch.sort(probs_sampling, descending=True)
+
+    # Determine nucleus cutoff count (keep at least one token).
+    if top_p >= 1.0:
+        kept_count = int(sorted_probs_sampling.numel())
     else:
-        cum = torch.cumsum(sorted_probs, dim=-1)
-        mask = cum <= float(top_p)
+        cum = torch.cumsum(sorted_probs_sampling, dim=-1)
+        mask = cum <= top_p
         if mask.numel() > 0:
             mask[0] = True
         kept_count = int(mask.sum().item())
 
-    # Take top-k from the full (pre-nucleus) distribution for display
-    k = min(int(top_k), int(sorted_ids.numel()))
-    top_ids = sorted_ids[:k]
-    top_base_probs = probs_base[top_ids]
-
-    # Renormalize kept probs for final distribution
-    kept_probs = sorted_probs[:kept_count]
+    kept_ids = sorted_ids_sampling[:kept_count]
+    kept_probs = sorted_probs_sampling[:kept_count]
     denom = kept_probs.sum()
-    top_final_probs = []
-    top_kept_flags = []
-    for i in range(k):
-        if i < kept_count and denom > 0:
-            top_final_probs.append(float((kept_probs[i] / denom).item()))
-            top_kept_flags.append(True)
-        else:
-            top_final_probs.append(0.0)
-            top_kept_flags.append(False)
+    if float(denom.detach().cpu().item()) <= 0.0:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid probability mass after applying current settings.",
+        )
+    kept_probs_norm = kept_probs / denom
 
-    # "Other mass" = everything beyond top-k in the final distribution.
-    other_final = float(max(0.0, 1.0 - float(sum(top_final_probs))))
-    other_base = float(max(0.0, 1.0 - float(top_base_probs.sum().item())))
-
-    # Decode tokens for display
+    k = min(top_k, int(sorted_ids_display.numel()))
+    top_ids = sorted_ids_display[:k]
+    top_base_probs = probs_base[top_ids]
     top_ids_list = [int(x) for x in top_ids.detach().cpu().tolist()]
     top_tokens = _token_pills_from_ids(tokenizer, top_ids_list)
 
-    # Attach probabilities
-    for i, tok in enumerate(top_tokens):
-        tok["p_base"] = float(top_base_probs[i].detach().cpu().item())
-        tok["p_final"] = float(top_final_probs[i])
-        tok["kept"] = bool(top_kept_flags[i])
+    kept_id_list = [int(x) for x in kept_ids.detach().cpu().tolist()]
+    kept_prob_list = [float(x) for x in kept_probs_norm.detach().cpu().tolist()]
+    kept_prob_map = {tid: prob for tid, prob in zip(kept_id_list, kept_prob_list)}
 
-    return {
+    top_final_probs: List[float] = []
+    for i, tok in enumerate(top_tokens):
+        tid = top_ids_list[i]
+        p_final = float(kept_prob_map.get(tid, 0.0))
+        is_valid = True
+        if valid_mask is not None:
+            is_valid = bool(valid_mask[tid].detach().cpu().item())
+            if not is_valid:
+                p_final = 0.0
+        tok["p_base"] = float(top_base_probs[i].detach().cpu().item())
+        tok["p_final"] = p_final
+        tok["kept"] = bool(tid in kept_prob_map and is_valid)
+        tok["valid"] = bool(is_valid)
+        top_final_probs.append(p_final)
+
+    other_final = float(max(0.0, 1.0 - float(sum(top_final_probs))))
+    other_base = float(max(0.0, 1.0 - float(top_base_probs.sum().item())))
+
+    dist = {
         "top_k": top_k,
         "tokens": top_tokens,
         "other_p_base": other_base,
         "other_p_final": other_final,
         "kept_token_count": int(kept_count),
+        "constraint_active": bool(constraint is not None),
+        "constraint_type": constraint.kind if constraint is not None else None,
+    }
+
+    return {
+        "dist": dist,
+        "kept_ids": kept_ids.detach().cpu(),
+        "kept_probs": kept_probs_norm.detach().cpu(),
+        "valid_mask": valid_mask.detach().cpu() if valid_mask is not None else None,
     }
 
 
-def _choose_next_token(
+def _compute_next_token_distribution(
+    model,
     tokenizer,
-    dist: Dict[str, Any],
-    greedy: bool,
-    branch_id: str,
-    seed: Optional[int],
-    reset_rng: bool,
-) -> int:
-    # dist["tokens"] are top-k in the final distribution, but sampling must happen across nucleus set.
-    # We'll sample using the kept distribution reconstructed by re-running nucleus filter quickly.
-    # For simplicity, we use the top-k set for greedy and for sampling when top_k is small.
-    # But to be correct, we should sample from the full nucleus set.
+    prompt_ids: List[int],
+    completion_ids: List[int],
+    top_k: int,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    presence_penalty: float,
+    frequency_penalty: float,
+    constraint: Optional[ConstraintSpec] = None,
+) -> Dict[str, Any]:
+    sampling_state = _compute_sampling_state(
+        model=model,
+        tokenizer=tokenizer,
+        prompt_ids=prompt_ids,
+        completion_ids=completion_ids,
+        top_k=top_k,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        presence_penalty=presence_penalty,
+        frequency_penalty=frequency_penalty,
+        constraint=constraint,
+    )
+    return sampling_state["dist"]
 
-    # We'll store nucleus info in dist? Currently we only store count.
-    # We'll re-compute needed tensors: we can’t without logits/probs.
-    # Instead, accept slight approximation by sampling from displayed top-k.
-    #
-    # For educational demos this is acceptable, but we'll do better by returning kept_ids/probs is too big.
-    #
-    # Better: in step endpoint we compute sampling from kept_ids/kept_probs directly, not via dist.
-    raise RuntimeError("Internal error: _choose_next_token should not be called.")
+
+def _is_token_allowed(valid_mask: Optional[torch.Tensor], token_id: int) -> bool:
+    if valid_mask is None:
+        return True
+    tid = int(token_id)
+    if tid < 0 or tid >= int(valid_mask.numel()):
+        return False
+    return bool(valid_mask[tid].item())
 
 
 class DecodingParams(BaseModel):
@@ -698,6 +901,13 @@ class DecodingParams(BaseModel):
     stop_sequences: List[str] = Field(default_factory=list)
 
 
+class ConstraintConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    enabled: bool = False
+    type: str = "multiple_choice"
+    schema_text: str = Field(default="", alias="schema")
+
+
 class PreviewRequest(BaseModel):
     branch_id: str = "default"
     prompt: str = ""
@@ -706,6 +916,7 @@ class PreviewRequest(BaseModel):
     completion_ids: List[int] = Field(default_factory=list)
     top_k: int = 10
     params: DecodingParams = Field(default_factory=DecodingParams)
+    constraint: ConstraintConfig = Field(default_factory=ConstraintConfig)
 
 
 class StepRequest(BaseModel):
@@ -717,6 +928,7 @@ class StepRequest(BaseModel):
     completion_ids: List[int] = Field(default_factory=list)
     top_k: int = 10
     params: DecodingParams = Field(default_factory=DecodingParams)
+    constraint: ConstraintConfig = Field(default_factory=ConstraintConfig)
     force_token_id: Optional[int] = None
     force_text: Optional[str] = None
 
@@ -803,6 +1015,7 @@ def load_model(req: LoadModelRequest):
 @app.post("/api/preview")
 def preview(req: PreviewRequest):
     model, tok, public = _require_ready_model()
+    constraint_spec = _resolve_constraint_spec(req.constraint)
 
     prompt_ids, full_ids = _build_input_ids(
         tok,
@@ -815,13 +1028,15 @@ def preview(req: PreviewRequest):
     dist = _compute_next_token_distribution(
         model=model,
         tokenizer=tok,
-        full_input_ids=full_ids,
+        prompt_ids=prompt_ids,
+        completion_ids=[int(x) for x in (req.completion_ids or [])],
         top_k=req.top_k,
         temperature=req.params.temperature,
         top_p=req.params.top_p,
         repetition_penalty=req.params.repetition_penalty,
         presence_penalty=req.params.presence_penalty,
         frequency_penalty=req.params.frequency_penalty,
+        constraint=constraint_spec,
     )
 
     # Display tokens exactly as the model sees them (including chat template tokens).
@@ -847,6 +1062,13 @@ def preview(req: PreviewRequest):
 @app.post("/api/step")
 def step(req: StepRequest):
     model, tok, public = _require_ready_model()
+    constraint_spec = _resolve_constraint_spec(req.constraint)
+
+    if constraint_spec is not None and req.force_text is not None and req.force_text != "":
+        raise HTTPException(
+            status_code=400,
+            detail="Force text is disabled while constrained sampling is active.",
+        )
 
     # Forcing multiple tokens via text is treated as a pure append (no sampling).
     if req.force_text is not None and req.force_text != "":
@@ -864,7 +1086,7 @@ def step(req: StepRequest):
         appended_meta: List[Dict[str, Any]] = []
         current_completion = [int(x) for x in (req.completion_ids or [])]
         for fid in forced_ids:
-            _prompt_ids, full_ids = _build_input_ids(
+            prompt_ids, _full_ids = _build_input_ids(
                 tok,
                 req.prompt,
                 current_completion,
@@ -874,13 +1096,15 @@ def step(req: StepRequest):
             dist = _compute_next_token_distribution(
                 model=model,
                 tokenizer=tok,
-                full_input_ids=full_ids,
+                prompt_ids=prompt_ids,
+                completion_ids=current_completion,
                 top_k=req.top_k,
                 temperature=req.params.temperature,
                 top_p=req.params.top_p,
                 repetition_penalty=req.params.repetition_penalty,
                 presence_penalty=req.params.presence_penalty,
                 frequency_penalty=req.params.frequency_penalty,
+                constraint=constraint_spec,
             )
             appended_meta.append(
                 {
@@ -929,7 +1153,7 @@ def step(req: StepRequest):
         }
 
     # Normal step: compute distribution, then choose token (greedy / sampled / forced token id)
-    prompt_ids, full_ids = _build_input_ids(
+    prompt_ids, _full_ids = _build_input_ids(
         tok,
         req.prompt,
         req.completion_ids,
@@ -937,82 +1161,23 @@ def step(req: StepRequest):
         system_prompt=req.system_prompt,
     )
 
-    # Forward pass to get logits and sampling distribution. We'll reuse the same computation for dist and sampling.
-    device = _select_device()
-    try:
-        model_device = next(model.parameters()).device
-    except Exception:
-        model_device = torch.device(device)
-
-    input_tensor = torch.tensor([full_ids], device=model_device, dtype=torch.long)
-    with torch.inference_mode():
-        outputs = model(input_ids=input_tensor)
-        logits = outputs.logits[0, -1].float()
-
-    logits_base = logits
-    probs_base = torch.softmax(logits_base, dim=-1)
-
-    logits_mod = logits_base.clone()
-    logits_mod = _apply_repetition_penalty(logits_mod, full_ids, req.params.repetition_penalty)
-    logits_mod = _apply_presence_frequency_penalties(
-        logits_mod, full_ids, req.params.presence_penalty, req.params.frequency_penalty
+    sampling_state = _compute_sampling_state(
+        model=model,
+        tokenizer=tok,
+        prompt_ids=prompt_ids,
+        completion_ids=[int(x) for x in (req.completion_ids or [])],
+        top_k=req.top_k,
+        temperature=req.params.temperature,
+        top_p=req.params.top_p,
+        repetition_penalty=req.params.repetition_penalty,
+        presence_penalty=req.params.presence_penalty,
+        frequency_penalty=req.params.frequency_penalty,
+        constraint=constraint_spec,
     )
-
-    temp = float(req.params.temperature)
-    if temp <= 0:
-        temp = 1e-6
-    probs_temp = torch.softmax(logits_mod / temp, dim=-1)
-
-    sorted_probs, sorted_ids = torch.sort(probs_temp, descending=True)
-
-    # Determine nucleus cutoff count (keep at least 1)
-    if float(req.params.top_p) >= 1.0:
-        kept_count = int(sorted_probs.numel())
-    else:
-        cum = torch.cumsum(sorted_probs, dim=-1)
-        mask = cum <= float(req.params.top_p)
-        if mask.numel() > 0:
-            mask[0] = True
-        kept_count = int(mask.sum().item())
-
-    kept_ids = sorted_ids[:kept_count]
-    kept_probs = sorted_probs[:kept_count]
-    denom = kept_probs.sum()
-    kept_probs_norm = kept_probs / denom if denom > 0 else kept_probs
-
-    # Distribution for display (top-k from full distribution)
-    top_k = int(max(1, min(int(req.top_k), 50)))
-    k = min(top_k, int(sorted_ids.numel()))
-    top_ids = sorted_ids[:k]
-    top_base_probs = probs_base[top_ids]
-
-    top_final_probs: List[float] = []
-    top_kept_flags: List[bool] = []
-    for i in range(k):
-        if i < kept_count and denom > 0:
-            top_final_probs.append(float(kept_probs_norm[i].detach().cpu().item()))
-            top_kept_flags.append(True)
-        else:
-            top_final_probs.append(0.0)
-            top_kept_flags.append(False)
-
-    other_final = float(max(0.0, 1.0 - float(sum(top_final_probs))))
-    other_base = float(max(0.0, 1.0 - float(top_base_probs.sum().item())))
-
-    top_ids_list = [int(x) for x in top_ids.detach().cpu().tolist()]
-    top_tokens = _token_pills_from_ids(tok, top_ids_list)
-    for i, t in enumerate(top_tokens):
-        t["p_base"] = float(top_base_probs[i].detach().cpu().item())
-        t["p_final"] = float(top_final_probs[i])
-        t["kept"] = bool(top_kept_flags[i])
-
-    dist = {
-        "top_k": top_k,
-        "tokens": top_tokens,
-        "other_p_base": other_base,
-        "other_p_final": other_final,
-        "kept_token_count": int(kept_count),
-    }
+    dist = sampling_state["dist"]
+    kept_ids_cpu = sampling_state["kept_ids"]
+    kept_probs_cpu = sampling_state["kept_probs"]
+    valid_mask_cpu = sampling_state["valid_mask"]
 
     # Choose token
     selected_id: int
@@ -1020,16 +1185,19 @@ def step(req: StepRequest):
 
     if req.force_token_id is not None:
         selected_id = int(req.force_token_id)
-        selected_prob_final = None
+        if constraint_spec is not None and not _is_token_allowed(valid_mask_cpu, selected_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Forced token is invalid under the active constrained sampling schema.",
+            )
     else:
+        if int(kept_ids_cpu.numel()) <= 0:
+            raise HTTPException(status_code=400, detail="No token available to sample.")
         if bool(req.params.greedy):
-            selected_id = int(kept_ids[0].detach().cpu().item())
-            selected_prob_final = float(kept_probs_norm[0].detach().cpu().item()) if denom > 0 else None
+            selected_id = int(kept_ids_cpu[0].item())
+            selected_prob_final = float(kept_probs_cpu[0].item())
         else:
             gen = _get_rng(req.branch_id, req.params.seed, reset=bool(req.reset_rng))
-            # Sample from nucleus set
-            kept_probs_cpu = kept_probs_norm.detach().cpu()
-            kept_ids_cpu = kept_ids.detach().cpu()
             # torch.multinomial expects 1D probs
             idx = int(torch.multinomial(kept_probs_cpu, num_samples=1, replacement=False, generator=gen).item())
             selected_id = int(kept_ids_cpu[idx].item())
