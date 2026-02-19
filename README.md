@@ -15,6 +15,8 @@
 
 </div>
 
+![LLM Next-Token Visualization app screenshot](assets/app-screenshot.png)
+
 ## 🎯 Overview
 
 Sampling is usually a **black box**. You tweak temperature or top-p and hope for better text, without seeing what changed at the token level.
