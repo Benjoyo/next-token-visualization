@@ -1396,7 +1396,7 @@
     lastDist: null,
     serverOk: false,
     collapsePromptStack: false,
-    llmEnabled: false,
+    llmEnabled: true,
     decodingCollapsedDefault: true,
     stepSpeedCollapsed: true,
     attrCollapsed: true,
@@ -1792,7 +1792,7 @@
       state.defaultParams.greedy = false;
     }
 
-    state.llmEnabled = readBool(STORAGE_KEYS.llmEnabled, false);
+    state.llmEnabled = readBool(STORAGE_KEYS.llmEnabled, true);
     state.decodingCollapsedDefault = readBool(STORAGE_KEYS.decodingCollapsed, true);
     state.stepSpeedCollapsed = readBool(STORAGE_KEYS.stepSpeedCollapsed, true);
     state.attrCollapsed = readBool(STORAGE_KEYS.attrCollapsed, true);
